@@ -152,16 +152,13 @@ SQL
 # LOC-Based Batching
 # ============================================================================
 
-# Build SQL filter clause for optional policy scoping
-if [[ -n "$POLICY_FILTER" ]]; then
-    POLICY_SQL_FILTER="AND s.policy = '$(sql_escape "$POLICY_FILTER")'"
-else
-    POLICY_SQL_FILTER=""
-fi
-
 # Get distinct file paths from all pending issues, with LOC counts.
-# Output: "file_path|loc" per line, sorted by path.
+# Arguments:
+#   $1 - policy_sql_filter: SQL WHERE clause fragment for policy filtering (e.g., "AND s.policy = 'foo'")
+# Output:
+#   "file_path|loc" per line, sorted by path.
 get_fix_files_with_loc() {
+    local policy_sql_filter="$1"
     local file_paths
     file_paths=$(db "
         SELECT DISTINCT f.path
@@ -170,7 +167,7 @@ get_fix_files_with_loc() {
         JOIN files f ON jf.file_id = f.id
         JOIN scans s ON i.scan_id = s.id
         WHERE i.fix_status = 'pending'
-        ${POLICY_SQL_FILTER}
+        ${policy_sql_filter}
         ORDER BY f.path;
     ")
 
@@ -211,10 +208,16 @@ batch_files_by_loc() {
 }
 
 # Get pending issues that reference ANY of the given files.
-# $1 = newline-separated list of file paths
-# Returns JSON array (same format as the old get_issues_for_home_branch).
+# Arguments:
+#   $1 - file_list: newline-separated list of file paths
+#   $2 - policy_sql_filter: SQL WHERE clause fragment for policy filtering (e.g., "AND s.policy = 'foo'")
+# Output:
+#   JSON array to stdout with schema:
+#   [{ id, description, rule, severity, suggestion, file_paths }, ...]
+#   where file_paths is a pipe-separated string of file paths
 get_issues_for_files() {
     local file_list="$1"
+    local policy_sql_filter="$2"
 
     # Build SQL IN clause from file paths
     local in_clause=""
@@ -333,6 +336,13 @@ get_policies_for_issues() {
 # Build Fix Prompt
 # ============================================================================
 
+# Constructs a formatted prompt string for Claude to fix code quality issues.
+# Arguments:
+#   $1 - batch_files: newline-separated file paths
+#   $2 - issues_json: JSON array with schema [{ id, description, rule, severity,
+#        suggestion, file_paths }, ...] where file_paths is pipe-separated
+# Output:
+#   Formatted prompt string to stdout (contains embedded newlines via printf %b)
 build_fix_prompt() {
     local batch_files="$1" # newline-separated file paths
     local issues_json="$2"
@@ -585,9 +595,16 @@ main() {
         trap 'rm -f "$SYSTEM_PROMPT_FILE"' EXIT
     fi
 
+    # Build SQL filter clause for optional policy scoping (used by get_fix_files_with_loc
+    # and get_issues_for_files). Declared here to avoid global state.
+    local POLICY_SQL_FILTER=""
+    if [[ -n "$POLICY_FILTER" ]]; then
+        POLICY_SQL_FILTER="AND s.policy = '$(sql_escape "$POLICY_FILTER")'"
+    fi
+
     # --- Build LOC-based batches from pending issue files ---
     local files_with_loc
-    files_with_loc=$(get_fix_files_with_loc)
+    files_with_loc=$(get_fix_files_with_loc "$POLICY_SQL_FILTER")
 
     if [[ -z "$files_with_loc" ]]; then
         printf '%s\n' "No pending issues to fix."
@@ -656,7 +673,7 @@ main() {
 
         # Get issues for the files in this batch (only still-pending ones)
         local issues_json
-        issues_json=$(get_issues_for_files "$batch_files")
+        issues_json=$(get_issues_for_files "$batch_files" "$POLICY_SQL_FILTER")
 
         local issue_ids
         issue_ids=$(printf '%s\n' "$issues_json" | jq -r '.[].id' 2>/dev/null | paste -s -d, -)
@@ -681,11 +698,10 @@ main() {
             printf '%s\n' "  Policies: ${policies[*]}"
         fi
 
-        # Build system prompt scoped to relevant policies only
-        # Issue 2: Clean up old temp file before creating new one
-        if [[ -f "$SYSTEM_PROMPT_FILE" ]]; then
-            rm -f "$SYSTEM_PROMPT_FILE"
-        fi
+        # Build system prompt scoped to relevant policies only.
+        # build_system_prompt creates a new temp file via mktemp,
+        # so we don't need to manually delete the old one here —
+        # the EXIT trap handles cleanup.
         build_system_prompt "${policies[@]}"
 
         local prompt
