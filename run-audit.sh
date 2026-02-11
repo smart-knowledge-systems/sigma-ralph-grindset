@@ -129,9 +129,11 @@ declare -a TEMP_FILES=()
 
 cleanup() {
     local f
-    for f in "${TEMP_FILES[@]}"; do
-        rm -f "$f"
-    done
+    if [[ ${#TEMP_FILES[@]} -gt 0 ]]; then
+        for f in "${TEMP_FILES[@]}"; do
+            rm -f "$f"
+        done
+    fi
     progress_cleanup
 }
 
@@ -751,6 +753,7 @@ main() {
                 AUDIT_BRANCHES=("${BRANCHES[@]}")
                 ;;
             NO_CHANGES)
+                progress_pause
                 printf '%s\n' "No $(ext_display_label) files changed since last audit — nothing to do."
                 printf '%s\n' ""
                 if [[ ${#POLICY_NAMES[@]} -eq 1 ]]; then

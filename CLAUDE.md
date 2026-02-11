@@ -1,261 +1,102 @@
-# CLAUDE.md - Sigma Ralph Grindset
+# CLAUDE.md
 
-This file provides guidance to Claude Code and other AI assistants working with this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## What This Is
 
-**Sigma Ralph Grindset** is a portable, policy-based code auditing and remediation system. It analyzes any codebase against configurable coding policies and applies automated fixes in batches ("ralph-loops"). It works as a self-contained tool (self-audit mode) or when cloned into another project's subdirectory (portable mode).
-
-- **Scalable**: Divides codebases into logical branches and batches
-- **Autonomous**: Runs audit-fix cycles without manual intervention
-- **Incremental**: Only re-audits changed code on subsequent runs
-- **Policy-driven**: Rules defined in markdown files in `policies/`
-
-## Policy System
-
-Policies are auto-discovered from `policies/` (relative to the tool directory). Convention: `policies/<policy-name>/POLICY.md` — folder name is the identifier (kebab-case), no config/frontmatter needed.
-
-**Active Policies** (in `policies/`, auto-discovered):
-
-| Policy              | Description                   |
-| ------------------- | ----------------------------- |
-| `bash-best-practices` | Shell scripting standards   |
-| `logging-strategy`    | Logging conventions         |
-| `testing-philosophy`  | Testing approach guidelines |
-
-**Portable Templates** (in `.policies/`, not auto-discovered): `convex-conventions`, `legend-state-conventions`, `vercel-composition-patterns`, `vercel-react-best-practices`. Copy into `policies/` of your target project to activate.
-
-**Adding a Policy**: `mkdir policies/my-policy`, create `policies/my-policy/POLICY.md`, run `./run-audit.sh my-policy`.
+Sigma Ralph Grindset (SIGMA) is a portable, policy-based code auditing and remediation system. It runs autonomous fix cycles ("ralph-loops") against any codebase using the `claude` CLI. The tool itself is a Bash-only codebase that audits shell scripts (or any configured file type) against policy documents, stores findings in SQLite, and applies fixes via Claude.
 
 ## Commands
 
-**Prerequisites**: `claude` CLI installed and authenticated.
-
 ```bash
-# Generate branches for auditing
-./generate-branches.sh              # Full generation -> branches.txt
-./generate-branches.sh --changed    # Also write branches-changed.txt (filtered)
+# Lint (shellcheck)
+bun check
 
-# Audit a specific policy (incremental — only changed branches)
-./run-audit.sh <policy-name>
+# Format (shfmt, 4-space indent)
+bun format
 
-# Full audit (all branches, ignores checkpoint)
-./run-audit.sh --all <policy-name>
+# Run all tests
+bun test
 
-# Combined audit (multiple policies in one system prompt)
-./run-audit.sh policy1 policy2 policy3
-./run-audit.sh --max-loc 2000 policy1 policy2 policy3
+# Run unit tests only
+bun test:unit
 
-# List available policies
-./run-audit.sh
+# Run integration tests only (requires sqlite3)
+bun test:integration
 
-# Full pipeline
-./run-all.sh                    # incremental
-./run-all.sh --all              # full audit
-./run-all.sh --combined         # combined mode (fewer API calls, max-loc=2000)
-./run-all.sh --all --combined   # full combined audit
+# Run a single test file
+bats test/lib.bats
 
-# Fix issues
-./run-fixes.sh                              # Fix all pending issues
-./run-fixes.sh logging-strategy             # Fix single policy
-./run-fixes.sh --interactive                # Interactive Claude session
-./run-fixes.sh --dangerously-skip-commits   # Fix without committing
+# Run a single test by name
+bats test/lib.bats --filter "sql_escape"
 
-# Verify branch coverage
-./verify-branches.sh
+# Full pipeline (generate branches → audit all policies → fix → checkpoint)
+./run-all.sh
+
+# Audit a single policy
+./run-audit.sh bash-best-practices
+
+# Audit multiple policies in one pass (fewer API calls)
+./run-audit.sh bash-best-practices logging-strategy testing-philosophy
+
+# Apply fixes from audit.db
+./run-fixes.sh
 ```
 
-**Database Inspection**:
+## Architecture
 
-```bash
-sqlite3 audit.db "SELECT status, COUNT(*) FROM scans GROUP BY status;"
-sqlite3 audit.db "SELECT severity, COUNT(*) FROM issues GROUP BY severity;"
-sqlite3 audit.db "SELECT s.policy, COUNT(i.id) FROM scans s LEFT JOIN issues i ON i.scan_id = s.id GROUP BY s.policy;"
-sqlite3 audit.db "SELECT f.path, COUNT(*) as count FROM issue_files jf JOIN files f ON jf.file_id = f.id GROUP BY f.path ORDER BY count DESC LIMIT 20;"
-sqlite3 audit.db "SELECT * FROM audit_checkpoints;"
-```
+### Pipeline Flow
 
-## Architecture Overview
+`run-all.sh` orchestrates the full pipeline:
+1. `generate-branches.sh` — scans `START_DIRS`, recursively splits directories until each "branch" is under `MAX_LOC`, writes `branches.txt`
+2. `run-audit.sh <policy>` — for each branch, feeds file contents + policy to Claude via `--print` mode, parses structured JSON output, stores issues in `audit.db`
+3. `run-fixes.sh` — batches pending issues by LOC, invokes Claude in agentic mode (`--permission-mode bypassPermissions`) to edit files, commits each batch
+4. Records git commit checkpoints per policy for incremental mode
 
-### Branch System
+### Library Layering
 
-The codebase is divided into **branches** — logical sections that group related files for review, processed independently by Claude CLI.
+- **`lib.sh`** — core shared library. Call `source lib.sh` then `init_paths` in every script. Provides: path resolution (`AUDIT_DIR`, `PROJECT_ROOT`), SQLite wrapper (`db`), file extension helpers, branch loading/matching, `sql_escape`, `truncate_for_db`, `count_loc`, `find_source_files`
+- **`logging.sh`** — sourced automatically by `lib.sh`. Provides `log_debug`, `log_info`, `log_warn`, `log_error` with level filtering (`LOG_LEVEL` env var), color, optional timestamps
+- **`lib-fixes.sh`** — extracted helpers for `run-fixes.sh`: file/LOC batching, issue querying, prompt construction
+- **`progress.sh`** — ANSI scroll-region progress footer. Supports owner/child nesting (parent `run-all.sh` owns footer, child scripts use `progress_substep`)
 
-- **Recursive branches**: `"src/components/bookshop"` — scans all files recursively
-- **Flat branches**: `"src/components (flat)"` — scans only immediate files (maxdepth=1)
+### Configuration
 
-The `(flat)` suffix enables mutually exclusive coverage: flat branch captures root-level files while subdirectories get their own recursive branches.
+`audit.conf` (sourced by `init_paths`) controls:
+- `START_DIRS` — directories to scan
+- `FILE_EXTENSIONS` — file types to audit (e.g., `"sh"`, `"ts tsx"`)
+- `MAX_LOC` / `MAX_FIX_LOC` — LOC limits for branch splitting and fix batching
+- `AUDIT_MODEL` / `FIX_MODEL` / `COMMIT_MODEL` — Claude model per stage
 
-```
-src/components/
-├── layout.tsx          # "src/components (flat)"
-├── bookshop/
-│   └── catalog.tsx     # "src/components/bookshop"
-└── dashboard/
-    └── overview.tsx    # "src/components/dashboard"
-```
+### Database Schema (audit.db, SQLite with WAL mode)
 
-Branches exceeding **MAX_LOC** (default 3000) are automatically split into batches (`[batch 1]`, `[batch 2]`, etc.), each processed separately.
+- **`scans`** — one row per branch+policy audit run (status, LOC, timestamps)
+- **`files`** — unique file path registry
+- **`issues`** — audit findings with severity, rule, suggestion, fix_status
+- **`issue_files`** — many-to-many join (issue ↔ file)
+- **`audit_checkpoints`** — per-policy git commit for incremental mode
+- **`fix_attempts`** — tracks each fix batch attempt (created by `run-fixes.sh`)
 
-### Shared Library (`lib.sh`)
+### Policies
 
-Central library sourced by all scripts via `source "$(cd "$(dirname "$0")" && pwd)/lib.sh" && init_paths`.
+Active policies in `policies/<name>/POLICY.md` — auto-discovered by the pipeline. Portable templates in `.policies/` can be copied into `policies/` to activate.
 
-**`init_paths()`** resolves paths and loads config:
-- `AUDIT_DIR` — directory containing `lib.sh`
-- `PROJECT_ROOT` — resolved via: (1) `SIGMA_PROJECT_ROOT` env var, (2) self-audit detection (`.git` in `AUDIT_DIR`), (3) default `AUDIT_DIR/..`
-- `DB_PATH`, `BRANCHES_FILE`, `POLICIES_DIR` — derived from `AUDIT_DIR`
-- `FILE_EXTENSIONS`, `START_DIRS` — defaults or loaded from `audit.conf`
+### Portable Mode
 
-**File extension helpers**:
-- `build_find_ext_array()` — populates global `EXT_FIND_ARGS` array with find-compatible extension args
-- `matches_extensions()` — checks if a filename matches `FILE_EXTENSIONS`
-- `ext_to_lang()` — maps first extension to code fence language tag
-- `ext_display_label()` — human-readable label (e.g., `.ts/.tsx`)
+When cloned into a subdirectory of another project, SIGMA detects that its own directory lacks `.git` and sets `PROJECT_ROOT` to the parent. Override with `SIGMA_PROJECT_ROOT` env var.
 
-**Data helpers**:
-- `db()` — SQLite wrapper with 5000ms busy timeout
-- `sql_escape()` — escape single quotes for SQL
-- `load_branches_for_matching()` / `file_to_branch()` — parse `branches.txt` and map files to branches via longest-prefix match
+## Testing
 
-### Progress System (`progress.sh`)
+Tests use [BATS](https://bats-core.readthedocs.io/) (Bash Automated Testing System) with bats-support, bats-assert, and bats-file helpers (cloned into `test/test_helper/`). Common setup in `test/test_helper/common-setup.bash` pre-sets globals and sources `lib.sh` so functions can be tested without calling `init_paths`.
 
-Terminal progress tracking with ANSI scroll regions, background spinner, and nested process support. Sourced by `run-all.sh`, `run-audit.sh`, `run-fixes.sh`. Key functions: `progress_init`, `progress_total`, `progress_step`, `progress_set`, `progress_substep`, `progress_cleanup`. Becomes no-ops when stdout is not a TTY.
+- Unit tests (`test/lib.bats`, `test/lib-fixes.bats`, `test/logging.bats`) — test pure functions in isolation
+- Integration tests (`test/database.bats`) — test SQLite schema creation and queries using temp databases
 
-### Database Schema
+## Shell Scripting Conventions
 
-SQLite with WAL mode for concurrent access. Init uses atomic `mkdir` lock for safety.
-
-**`scans`**: One record per branch/batch/policy.
-- `id`, `branch_path`, `policy`, `started_at`, `completed_at`, `status` (running/completed/failed/skipped), `file_count`, `total_loc`, `error_message`, `issue_count`
-- In combined mode, `policy` stores pipe-separated label (e.g., `"policy1|policy2|policy3"`)
-
-**`issues`**: Individual code quality issues.
-- `id`, `scan_id` (FK → scans), `description`, `rule`, `severity` (high/medium/low), `suggestion`, `policy`, `created_at`, `fix_status` (pending/in_progress/fixed/failed/skipped), `fixed_at`
-- `policy` stores the individual policy name per issue (critical for fix scoping, even in combined mode)
-
-**`files`**: Unique file paths (`id`, `path`).
-
-**`issue_files`**: Junction table (`issue_id`, `file_id`).
-
-**`audit_checkpoints`**: Incremental audit tracking (`policy` PK, `git_commit`, `completed_at`).
-
-**`fix_attempts`**: Fix batch tracking.
-- `id`, `branch_path` (human-readable batch label), `attempt_number`, `started_at`, `completed_at`, `status` (running/success/check_failed/failed), `check_output`, `error_message`, `claude_output`
-
-### Workflow
-
-1. **Branch Generation** (`generate-branches.sh`):
-   - Scans `START_DIRS`, splits directories until under MAX_LOC, outputs `branches.txt`
-   - `--changed`: also writes `branches-changed.txt` filtered to branches with changes since oldest audit checkpoint
-
-2. **Audit Execution** (`run-audit.sh`):
-   - **Single-policy mode** (default MAX_LOC=3000): audits against one policy
-   - **Combined mode** (multiple policy args): merges all policies into one system prompt; `--max-loc` overrides default (recommended 2000); Claude tags each issue with specific policy; `scans.policy` stores pipe-separated label, `issues.policy` stores individual name
-   - **Incremental** (default): uses `audit_checkpoints` to find changed branches; **Full** (`--all`): audits all branches
-   - Per branch: finds files, counts LOC, batches if needed, extracts imports, resolves path aliases, calls Claude CLI (model: Opus, max-turns: 100), validates JSON, inserts to DB
-   - Supersedes stale pending issues before re-auditing each branch+policy
-
-3. **Fix Execution** (`run-fixes.sh`):
-   - Batches pending issue files under `MAX_FIX_LOC` (2000 lines), sorted by path
-   - Per batch: queries `issues.policy` to scope system prompt to relevant policies only
-   - Calls Claude (model: Opus 4.6) to fix; runs `bun check` + `bun format`; commits via Claude (model: Haiku)
-   - `--dangerously-skip-commits`: apply fixes without committing
-   - `--interactive`: opens Claude session without `--print`
-
-4. **Full Pipeline** (`run-all.sh`):
-   - Generates branches, runs audits (per-policy or `--combined`), runs fixes, records checkpoints
-
-5. **Verification** (`verify-branches.sh`):
-   - Checks every file appears in exactly one branch; reports duplicates and gaps
-
-## Key Implementation Details
-
-### Path Alias Resolution
-
-The audit tool resolves TypeScript path aliases when extracting imports (hardcoded in `run-audit.sh:164-169` — edit for your project):
-
-- `@/convex/*` → `convex/*`
-- `@/*` → `src/*`
-
-### Claude CLI Integration
-
-**Output Format**: JSON with strict schema validation:
-
-```json
-{
-  "issues": [
-    {
-      "description": "String describing the problem",
-      "rule": "Name of the violated rule",
-      "severity": "high|medium|low",
-      "suggestion": "Concrete fix suggestion",
-      "policy": "policy-name",
-      "files": ["path/to/file.tsx"]
-    }
-  ]
-}
-```
-
-### Severity Mapping
-
-- **high**: Performance problems, bugs, patterns that could break functionality
-- **medium**: Maintainability issues, code smells, suboptimal patterns
-- **low**: Style improvements, minor optimizations
-
-## Configuration
-
-### `audit.conf`
-
-Optional file in the **project root**. Sourced by `init_paths()`:
-
-```bash
-START_DIRS=("src/components" "src/app" "src/lib")
-FILE_EXTENSIONS="ts tsx"  # space-separated
-
-# LOC limits
-MAX_LOC=2000       # branches/batches exceeding this are split (--max-loc flag still overrides)
-MAX_FIX_LOC=1500   # fix batch LOC limit
-
-# Claude model selection per stage
-AUDIT_MODEL="haiku"          # run-audit.sh: code review
-FIX_MODEL="sonnet" # run-fixes.sh: apply fixes
-COMMIT_MODEL="haiku"        # run-fixes.sh: generate commit messages
-```
-
-Defaults (set in `lib.sh init_paths()`, overridable via `audit.conf`):
-- `FILE_EXTENSIONS="ts tsx"`, `START_DIRS` = common `src/` subdirectories
-- `MAX_LOC=3000`, `MAX_FIX_LOC=2000`
-- `AUDIT_MODEL="opus"`, `FIX_MODEL="claude-opus-4-6"`, `COMMIT_MODEL="haiku"`
-
-This repo's `audit.conf`: `START_DIRS=(".")`, `FILE_EXTENSIONS="sh"`.
-
-### Environment Variables
-
-- `SIGMA_PROJECT_ROOT` — override auto-detected project root
-
-## Troubleshooting
-
-### Branch Coverage Issues
-
-Run `./generate-branches.sh` then `./verify-branches.sh` to confirm coverage.
-
-### Claude CLI Errors
-
-- **Authentication**: `claude login`
-- **Rate limits**: Add sleep delays in `process_branch()`
-- **JSON parse errors**: Check policy `POLICY.md` files exist
-
-### Database Reset
-
-```bash
-rm audit.db && ./run-audit.sh <policy-name>  # Reinitializes schema
-```
-
-## Important Notes
-
-- **Portable**: Configure `audit.conf` with `START_DIRS`/`FILE_EXTENSIONS`, or use TypeScript defaults
-- **`run-audit.sh` is read-only** — never modifies source files
-- **`run-fixes.sh` modifies source files** — use with version control
-- `branches.txt` is the canonical full branch list; `branches-changed.txt` is the filtered subset
-- `fix_attempts.branch_path` stores batch labels for display, not for joins
+This codebase targets **Bash 3.2** (macOS default). Key constraints:
+- No associative arrays, `readarray`/`mapfile`, `${var,,}`, or negative array indices
+- Use `printf '%s\n'` over `echo`; `[[ ]]` over `[ ]`
+- All variables quoted; `local` in every function
+- `shfmt` enforces 4-space indentation with `-ci` flag
+- All scripts must pass `shellcheck` with zero warnings

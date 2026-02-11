@@ -72,13 +72,7 @@ The tool auto-detects portable mode by checking for `.git` in its own directory.
 
 ## About the Name
 
-**Sigma Ralph Grindset** combines three layers of irony:
-
-1. **Ralph Wiggum** — TV's most beloved dim-witted character (The Simpsons)
-2. **SIGMA** — "Systematic Issue Gathering & Management Approach" (and Gen Z slang for independent, self-reliant)
-3. **Grindset** — Internet slang for hustle culture/productivity obsession
-
-A system named after an incompetent character that actually embodies sophisticated, autonomous, sigma-energy self-improvement. **Ralph-loops** (the iteration cycles) are named similarly — deceptively simple but effective.
+A system named after an incompetent character that actually embodies sophisticated, autonomous, sigma-energy self-improvement.
 
 ## Development
 

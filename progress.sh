@@ -362,7 +362,12 @@ _progress_render() {
     cols=$(tput cols 2>/dev/tty || echo 80)
 
     # Spinner frame
-    local frame_idx=$((($(date +%s) - START_EPOCH) % ${#_PROGRESS_SPINNER_FRAMES[@]}))
+    local frame_idx
+    if [[ $# -ge 1 ]]; then
+        frame_idx=$(($1 % ${#_PROGRESS_SPINNER_FRAMES[@]}))
+    else
+        frame_idx=$((($(date +%s) - START_EPOCH) % ${#_PROGRESS_SPINNER_FRAMES[@]}))
+    fi
     local spinner="${_PROGRESS_SPINNER_FRAMES[$frame_idx]}"
 
     # Elapsed time
@@ -415,9 +420,11 @@ _progress_render() {
 # Stores the PID in _PROGRESS_TIMER_PID for cleanup.
 _progress_start_timer() {
     (
+        local _frame=0
         while true; do
-            _progress_render
-            sleep 1
+            _progress_render "$_frame"
+            _frame=$((_frame + 1))
+            sleep 0.2
         done
     ) &
     _PROGRESS_TIMER_PID=$!
