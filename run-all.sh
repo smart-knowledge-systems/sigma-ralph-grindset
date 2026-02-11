@@ -102,7 +102,7 @@ main() {
     # Step 1: Generate branches
     progress_title "Pipeline: Generate branches"
     progress_step "Generate branches"
-    printf '%s\n' "--- Step 1: Generate branches ---"
+    log_info "--- Step 1: Generate branches ---"
     bash "${AUDIT_DIR}/generate-branches.sh"
     printf '%s\n' ""
 
@@ -124,8 +124,12 @@ main() {
 
         progress_title "Pipeline: Audit combined (${#all_policies[@]} policies)"
         progress_step "Audit: combined"
-        printf '%s\n' "--- Step 2: Audit combined (${#all_policies[@]} policies) ---"
-        bash "${AUDIT_DIR}/run-audit.sh" ${audit_flags[@]+"${audit_flags[@]}"} --max-loc 2000 "${all_policies[@]}"
+        log_info "--- Step 2: Audit combined (${#all_policies[@]} policies) ---"
+        if [[ ${#audit_flags[@]} -gt 0 ]]; then
+            bash "${AUDIT_DIR}/run-audit.sh" "${audit_flags[@]}" --max-loc 2000 "${all_policies[@]}"
+        else
+            bash "${AUDIT_DIR}/run-audit.sh" --max-loc 2000 "${all_policies[@]}"
+        fi
         printf '%s\n' ""
     else
         # Per-policy loop (existing behavior)
@@ -139,8 +143,12 @@ main() {
             ((policy_idx++))
             progress_title "Pipeline: Audit ${policy_name} (${policy_idx}/${policy_count})"
             progress_step "Audit: ${policy_name} (${policy_idx}/${policy_count})"
-            printf '%s\n' "--- Step 2: Audit policy: ${policy_name} (${policy_idx}/${policy_count}) ---"
-            bash "${AUDIT_DIR}/run-audit.sh" ${audit_flags[@]+"${audit_flags[@]}"} "$policy_name"
+            log_info "--- Step 2: Audit policy: ${policy_name} (${policy_idx}/${policy_count}) ---"
+            if [[ ${#audit_flags[@]} -gt 0 ]]; then
+                bash "${AUDIT_DIR}/run-audit.sh" "${audit_flags[@]}" "$policy_name"
+            else
+                bash "${AUDIT_DIR}/run-audit.sh" "$policy_name"
+            fi
             printf '%s\n' ""
         done
     fi
@@ -148,14 +156,14 @@ main() {
     # Step 3: Run fixes
     progress_title "Pipeline: Fix issues"
     progress_step "Fix issues"
-    printf '%s\n' "--- Step 3: Run fixes ---"
+    log_info "--- Step 3: Run fixes ---"
     bash "${AUDIT_DIR}/run-fixes.sh"
     printf '%s\n' ""
 
     # Step 4: Record checkpoints for each policy
     progress_title "Pipeline: Record checkpoints"
     progress_step "Record checkpoints"
-    printf '%s\n' "--- Step 4: Record audit checkpoints ---"
+    log_info "--- Step 4: Record audit checkpoints ---"
 
     # Ensure DB and checkpoint table exist (run-audit.sh init_database creates it,
     # but guard against edge cases where all policies were skipped)

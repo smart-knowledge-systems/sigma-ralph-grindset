@@ -79,12 +79,12 @@ done
 
 if [[ ${#POLICY_NAMES[@]} -eq 0 ]]; then
     log_error "Usage: $0 [--all] [--max-loc N] <policy-name> [policy-name2 ...]"
-    err ""
-    err "Available policies:"
+    log_error ""
+    log_error "Available policies:"
     for policy_dir in "${POLICIES_DIR}"/*/; do
         [[ ! -d "$policy_dir" ]] && continue
         dir_name=$(basename "$policy_dir")
-        [[ -f "${policy_dir}POLICY.md" ]] && err "  - ${dir_name}"
+        [[ -f "${policy_dir}POLICY.md" ]] && log_error "  - ${dir_name}"
     done
     exit 1
 fi
@@ -94,14 +94,13 @@ POLICY_LABEL=""
 for policy_name in "${POLICY_NAMES[@]}"; do
     POLICY_FILE="${POLICIES_DIR}/${policy_name}/POLICY.md"
     if [[ ! -f "$POLICY_FILE" ]]; then
-        log_error "Policy not found: ${policy_name}"
-        err "Expected: ${POLICY_FILE}"
-        err ""
-        err "Available policies:"
+        log_error "Policy not found: ${policy_name}. Checked location: ${POLICY_FILE}"
+        log_error ""
+        log_error "Available policies:"
         for policy_dir in "${POLICIES_DIR}"/*/; do
             [[ ! -d "$policy_dir" ]] && continue
             dir_name=$(basename "$policy_dir")
-            [[ -f "${policy_dir}POLICY.md" ]] && err "  - ${dir_name}"
+            [[ -f "${policy_dir}POLICY.md" ]] && log_error "  - ${dir_name}"
         done
         exit 1
     fi
@@ -125,9 +124,11 @@ while IFS= read -r line; do
     [[ -n "$line" ]] && BRANCHES+=("$line")
 done <"$BRANCHES_FILE"
 
-# Temp file tracking for cleanup on unexpected exit
-TEMP_FILES=()
+# Temp file tracking for cleanup on unexpected exit (global array)
+declare -a TEMP_FILES=()
+
 cleanup() {
+    local f
     for f in "${TEMP_FILES[@]}"; do
         rm -f "$f"
     done
@@ -283,13 +284,33 @@ Review the provided code and identify violations of the guidelines below. For ea
 
 PROMPT
 
+    local policy_name
+    local policy_file
+    local policies_loaded=0
     for policy_name in "$@"; do
-        local policy_file="${POLICIES_DIR}/${policy_name}/POLICY.md"
-        if [[ -f "$policy_file" ]]; then
-            printf '\n## Guidelines: %s\n\n' "$policy_name" >>"$temp_file"
-            cat "$policy_file" >>"$temp_file"
+        policy_file="${POLICIES_DIR}/${policy_name}/POLICY.md"
+        if [[ ! -f "$policy_file" ]]; then
+            log_warn "Policy file not found: ${policy_file}, skipping"
+            continue
         fi
+        if [[ ! -r "$policy_file" ]]; then
+            log_warn "Policy file not readable: ${policy_file}, skipping"
+            continue
+        fi
+        if [[ ! -s "$policy_file" ]]; then
+            log_warn "Policy file is empty: ${policy_file}, skipping"
+            continue
+        fi
+        printf '\n## Guidelines: %s\n\n' "$policy_name" >>"$temp_file"
+        cat "$policy_file" >>"$temp_file"
+        ((policies_loaded++)) || true
     done
+
+    if [[ $policies_loaded -eq 0 ]]; then
+        log_error "No valid policy files loaded in build_system_prompt"
+        rm -f "$temp_file"
+        return 1
+    fi
 
     printf '%s\n' "$temp_file"
 }
@@ -301,7 +322,8 @@ PROMPT
 process_branch() {
     local branch="$1"
     local batch_suffix="${2:-}"
-    local files=("${@:3}")
+    shift 2
+    local -a files=("$@")
 
     local branch_label="$branch${batch_suffix}"
 
@@ -472,7 +494,14 @@ process_branch() {
 # Output: total LOC count to stdout
 prescan_loc() {
     local total=0
-    local branch prescan_branch prescan_flat prescan_path
+    local branch
+    local prescan_branch
+    local prescan_flat
+    local prescan_path
+    local prescan_files
+    local prescan_loc
+    local f
+
     for branch in "$@"; do
         prescan_branch="$branch"
         prescan_flat=""
@@ -482,12 +511,11 @@ prescan_loc() {
         fi
         prescan_path="${PROJECT_ROOT}/${prescan_branch}"
         if [[ -d "$prescan_path" ]]; then
-            local prescan_files=()
+            prescan_files=()
             while IFS= read -r f; do
                 prescan_files+=("$f")
             done < <(find_source_files "$prescan_path" "$prescan_flat")
             if [[ ${#prescan_files[@]} -gt 0 ]]; then
-                local prescan_loc
                 prescan_loc=$(count_loc "${prescan_files[@]}")
                 total=$((total + prescan_loc))
             fi
@@ -533,7 +561,7 @@ process_all_branches() {
 
         # Check if path exists
         if [[ ! -d "$full_path" ]]; then
-            log_warn "Skipping: $branch (path not found)"
+            log_warn "Skipping ${branch}: directory not found at ${full_path}"
             db "INSERT INTO scans (branch_path, policy, status) VALUES ('$(sql_escape "$branch")', '$(sql_escape "$POLICY_LABEL")', 'skipped');"
             continue
         fi
@@ -571,7 +599,7 @@ process_all_branches() {
             fi
         else
             # Split into batches
-            log_info "Branch $branch exceeds LOC limit ($total_loc > $MAX_LOC), splitting into batches"
+            log_info "Branch ${branch} exceeds LOC limit (${total_loc} > ${MAX_LOC}), splitting into batches"
 
             local batch_num=1
             local batch_files=()

@@ -282,13 +282,33 @@ RULES:
 - After making changes, use /check-and-fix to verify lint and type checks pass
 PROMPT
 
+    local policy_name
+    local policy_file
+    local policies_loaded=0
     for policy_name in "${policies[@]}"; do
-        local policy_file="${POLICIES_DIR}/${policy_name}/POLICY.md"
-        if [[ -f "$policy_file" ]]; then
-            printf '\n--- %s ---\n\n' "$policy_name" >>"$SYSTEM_PROMPT_FILE"
-            cat "$policy_file" >>"$SYSTEM_PROMPT_FILE"
+        policy_file="${POLICIES_DIR}/${policy_name}/POLICY.md"
+        if [[ ! -f "$policy_file" ]]; then
+            log_warn "Policy file not found: ${policy_file}, skipping"
+            continue
         fi
+        if [[ ! -r "$policy_file" ]]; then
+            log_warn "Policy file not readable: ${policy_file}, skipping"
+            continue
+        fi
+        if [[ ! -s "$policy_file" ]]; then
+            log_warn "Policy file is empty: ${policy_file}, skipping"
+            continue
+        fi
+        printf '\n--- %s ---\n\n' "$policy_name" >>"$SYSTEM_PROMPT_FILE"
+        cat "$policy_file" >>"$SYSTEM_PROMPT_FILE"
+        ((policies_loaded++)) || true
     done
+
+    if [[ $policies_loaded -eq 0 ]]; then
+        log_error "No valid policy files loaded in build_system_prompt"
+        rm -f "$SYSTEM_PROMPT_FILE"
+        return 1
+    fi
 }
 
 # Query distinct policies for a set of issue IDs (comma-separated)
