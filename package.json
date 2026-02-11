@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "scripts": {
+    "check": "shellcheck *.sh",
+    "format": "shfmt -w -i 4 -ci *.sh"
+  },
+  "devDependencies": {
+    "shellcheck": "^4.1.0"
+  }
+}
