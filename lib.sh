@@ -11,10 +11,13 @@
 #
 # init_paths resolves AUDIT_DIR, PROJECT_ROOT, DB_PATH, BRANCHES_FILE,
 # POLICIES_DIR, FILE_EXTENSIONS, and START_DIRS. It also sources
-# ${PROJECT_ROOT}/audit.conf if it exists.
+# ${AUDIT_DIR}/audit.conf if it exists.
 #
-# Self-audit detection: if AUDIT_DIR itself contains .git, then
-# PROJECT_ROOT = AUDIT_DIR (the tool is at the repo root).
+# Portable mode detection:
+#   1. SIGMA_PROJECT_ROOT env var → explicit override
+#   2. Parent has .git → portable mode (PROJECT_ROOT = AUDIT_DIR/..)
+#   3. AUDIT_DIR has .git → self-audit (PROJECT_ROOT = AUDIT_DIR)
+#   4. Neither → portable mode fallback (AUDIT_DIR/..)
 # Override: set SIGMA_PROJECT_ROOT env var before calling init_paths.
 # ============================================================================
 
@@ -37,15 +40,24 @@ init_paths() {
 
     # PROJECT_ROOT resolution:
     #   1. SIGMA_PROJECT_ROOT env var (explicit override)
-    #   2. Self-audit: AUDIT_DIR contains .git → PROJECT_ROOT = AUDIT_DIR
-    #   3. Default: AUDIT_DIR/.. (tool lives in a subdirectory of the project)
+    #   2. Parent has .git → portable mode (cloned into someone's project)
+    #   3. AUDIT_DIR has .git → self-audit (standalone repo)
+    #   4. Neither → portable mode fallback (AUDIT_DIR/..)
+    local _sigma_mode=""
     if [[ -n "${SIGMA_PROJECT_ROOT:-}" ]]; then
         PROJECT_ROOT="$(cd "$SIGMA_PROJECT_ROOT" && pwd)"
+        _sigma_mode="explicit"
+    elif [[ -e "${AUDIT_DIR}/../.git" ]]; then
+        # Parent has .git — we're inside someone else's repo (portable mode)
+        PROJECT_ROOT="$(cd "${AUDIT_DIR}/.." && pwd)"
+        _sigma_mode="portable"
     elif [[ -e "${AUDIT_DIR}/.git" ]]; then
-        # .git can be a directory (normal repo) or a file (submodule/worktree)
+        # Only our own .git exists — standalone self-audit
         PROJECT_ROOT="$AUDIT_DIR"
+        _sigma_mode="self-audit"
     else
         PROJECT_ROOT="$(cd "${AUDIT_DIR}/.." && pwd)"
+        _sigma_mode="portable-fallback"
     fi
 
     DB_PATH="${AUDIT_DIR}/audit.db"
@@ -65,10 +77,10 @@ init_paths() {
     : "${COMMIT_MODEL:=haiku}"
     # START_DIRS default is set after sourcing audit.conf (see below)
 
-    # Source project-level config if it exists
-    if [[ -f "${PROJECT_ROOT}/audit.conf" ]]; then
+    # Source config from AUDIT_DIR (consumers configure where the tool lives)
+    if [[ -f "${AUDIT_DIR}/audit.conf" ]]; then
         # shellcheck source=/dev/null
-        source "${PROJECT_ROOT}/audit.conf"
+        source "${AUDIT_DIR}/audit.conf"
     fi
 
     # Default START_DIRS if not set by audit.conf or caller
@@ -85,6 +97,8 @@ init_paths() {
 
     export AUDIT_DIR PROJECT_ROOT DB_PATH BRANCHES_FILE POLICIES_DIR FILE_EXTENSIONS
     export MAX_LOC MAX_FIX_LOC AUDIT_MODEL FIX_MODEL COMMIT_MODEL
+
+    log_debug "init_paths: mode=${_sigma_mode} PROJECT_ROOT=${PROJECT_ROOT} AUDIT_DIR=${AUDIT_DIR}"
 }
 
 # ---------------------------------------------------------------------------

@@ -48,6 +48,7 @@ bats test/lib.bats --filter "sql_escape"
 ### Pipeline Flow
 
 `run-all.sh` orchestrates the full pipeline:
+
 1. `generate-branches.sh` — scans `START_DIRS`, recursively splits directories until each "branch" is under `MAX_LOC`, writes `branches.txt`
 2. `run-audit.sh <policy>` — for each branch, feeds file contents + policy to Claude via `--print` mode, parses structured JSON output, stores issues in `audit.db`
 3. `run-fixes.sh` — batches pending issues by LOC, invokes Claude in agentic mode (`--permission-mode bypassPermissions`) to edit files, commits each batch
@@ -63,6 +64,7 @@ bats test/lib.bats --filter "sql_escape"
 ### Configuration
 
 `audit.conf` (sourced by `init_paths`) controls:
+
 - `START_DIRS` — directories to scan
 - `FILE_EXTENSIONS` — file types to audit (e.g., `"sh"`, `"ts tsx"`)
 - `MAX_LOC` / `MAX_FIX_LOC` — LOC limits for branch splitting and fix batching
@@ -95,6 +97,7 @@ Tests use [BATS](https://bats-core.readthedocs.io/) (Bash Automated Testing Syst
 ## Shell Scripting Conventions
 
 This codebase targets **Bash 3.2** (macOS default). Key constraints:
+
 - No associative arrays, `readarray`/`mapfile`, `${var,,}`, or negative array indices
 - Use `printf '%s\n'` over `echo`; `[[ ]]` over `[ ]`
 - All variables quoted; `local` in every function

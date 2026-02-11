@@ -173,6 +173,17 @@ main() {
         fi
     done
 
+    # Guard: if no branches were found, provide diagnostic info and exit
+    if [[ ${#BRANCHES[@]} -eq 0 ]]; then
+        log_error "No branches generated — no source files found."
+        log_error "  PROJECT_ROOT: ${PROJECT_ROOT}"
+        log_error "  START_DIRS:   ${START_DIRS[*]}"
+        log_error "  FILE_EXTENSIONS: ${FILE_EXTENSIONS}"
+        log_error "  Mode: $(if [[ -e "${AUDIT_DIR}/../.git" ]]; then printf 'portable'; elif [[ -e "${AUDIT_DIR}/.git" ]]; then printf 'self-audit'; else printf 'portable-fallback'; fi)"
+        log_error "Check that START_DIRS in audit.conf point to directories that exist under PROJECT_ROOT."
+        exit 1
+    fi
+
     # Write full branch list atomically (temp file + mv prevents partial output on failure)
     local tmp_branches
     tmp_branches=$(mktemp)

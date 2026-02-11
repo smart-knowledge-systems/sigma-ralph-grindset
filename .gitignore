@@ -2,8 +2,6 @@ node_modules/
 audit.d*
 branch*.txt
 *.log
-verify-branches.sh
-.policies/
 
 # BATS test helper libraries (cloned)
 test/test_helper/bats-support/
