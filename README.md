@@ -32,23 +32,27 @@ Requires the `claude` CLI to be installed and authenticated.
 ├── lib.sh                  # Shared library (paths, DB, extensions)
 ├── progress.sh             # Terminal progress bar with scroll regions
 ├── audit.conf              # Per-project config (START_DIRS, FILE_EXTENSIONS)
-├── policies/               # Active policies (auto-discovered)
-├── .policies/              # Portable policy templates (copy to activate)
+├── policies/               # Active policies (auto-discovered by pipeline)
+├── .policies/              # Inactive policies (move to policies/ to activate)
 ├── audit.db                # SQLite database of scans, issues, fixes
 └── CLAUDE.md               # Full architecture reference for AI assistants
 ```
 
 ## Policies
 
-Policies live in `policies/<name>/POLICY.md`. Active policies for this repo:
+The pipeline auto-discovers and runs **only** policies in `policies/` (active). Inactive policies live in `.policies/` and are ignored until moved. Move policies between the two folders to activate or deactivate them.
+
+**Active** (`policies/`):
 
 - **`bash-best-practices`** — Shell scripting standards
 - **`logging-strategy`** — Logging conventions
 - **`testing-philosophy`** — Testing approach guidelines
 
-Portable templates in `.policies/` (copy into `policies/` to use): `convex-conventions`, `legend-state-conventions`, `vercel-composition-patterns`, `vercel-react-best-practices`.
+**Inactive** (`.policies/` — move to `policies/` to activate):
 
-To add a policy: `mkdir policies/my-policy`, write `POLICY.md`, run `./run-audit.sh my-policy`.
+- `convex-conventions`, `legend-state-conventions`, `vercel-composition-patterns`, `vercel-react-best-practices`
+
+To add a new policy: `mkdir policies/my-policy`, write `POLICY.md`, run `./run-audit.sh my-policy`.
 
 ## Using on Your Own Codebase
 
@@ -56,7 +60,7 @@ To add a policy: `mkdir policies/my-policy`, write `POLICY.md`, run `./run-audit
    ```bash
    git clone <repo-url> audit/
    ```
-2. **Create `audit.conf`** in your project root:
+2. **Edit `audit/audit.conf`** to configure your project:
    ```bash
    START_DIRS=("src/components" "src/app" "src/lib")
    FILE_EXTENSIONS="ts tsx"
@@ -68,7 +72,7 @@ To add a policy: `mkdir policies/my-policy`, write `POLICY.md`, run `./run-audit
    ```
 5. **Review** the git diff and commit
 
-The tool auto-detects portable mode by checking for `.git` in its own directory. Override with `SIGMA_PROJECT_ROOT` env var if needed.
+The tool auto-detects portable mode by checking if the **parent directory** contains `.git`. When it does (i.e., `audit/` lives inside your repo), `PROJECT_ROOT` resolves to the parent project. When only `audit/.git` exists (standalone), it runs in self-audit mode. Override with `SIGMA_PROJECT_ROOT` env var for edge cases.
 
 ## About the Name
 
@@ -80,4 +84,4 @@ See `CLAUDE.md` for full architecture documentation, database schema, and implem
 
 ---
 
-*"Me fail English? That's unpossible."* — Ralph Wiggum
+_"Me fail English? That's unpossible."_ — Ralph Wiggum
