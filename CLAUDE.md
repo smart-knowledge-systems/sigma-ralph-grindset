@@ -91,8 +91,8 @@ src/components/
 ├── layout.tsx          # "src/components (flat)"
 ├── bookshop/
 │   └── catalog.tsx     # "src/components/bookshop"
-└── ear-reader/
-    └── reader.tsx      # "src/components/ear-reader"
+└── dashboard/
+    └── overview.tsx    # "src/components/dashboard"
 ```
 
 Branches exceeding **MAX_LOC** (default 3000) are automatically split into batches (`[batch 1]`, `[batch 2]`, etc.), each processed separately.
@@ -175,7 +175,6 @@ SQLite with WAL mode for concurrent access. Init uses atomic `mkdir` lock for sa
 
 The audit tool resolves TypeScript path aliases when extracting imports (hardcoded in `run-audit.sh:164-169` — edit for your project):
 
-- `@/ear-reader/*` → `src/components/ear-reader/*`
 - `@/convex/*` → `convex/*`
 - `@/*` → `src/*`
 
@@ -213,19 +212,27 @@ Optional file in the **project root**. Sourced by `init_paths()`:
 ```bash
 START_DIRS=("src/components" "src/app" "src/lib")
 FILE_EXTENSIONS="ts tsx"  # space-separated
+
+# LOC limits
+MAX_LOC=2000       # branches/batches exceeding this are split (--max-loc flag still overrides)
+MAX_FIX_LOC=1500   # fix batch LOC limit
+
+# Claude model selection per stage
+AUDIT_MODEL="haiku"          # run-audit.sh: code review
+FIX_MODEL="sonnet" # run-fixes.sh: apply fixes
+COMMIT_MODEL="haiku"        # run-fixes.sh: generate commit messages
 ```
 
-Defaults: `FILE_EXTENSIONS="ts tsx"`, `START_DIRS` = common `src/` subdirectories.
+Defaults (set in `lib.sh init_paths()`, overridable via `audit.conf`):
+- `FILE_EXTENSIONS="ts tsx"`, `START_DIRS` = common `src/` subdirectories
+- `MAX_LOC=3000`, `MAX_FIX_LOC=2000`
+- `AUDIT_MODEL="opus"`, `FIX_MODEL="claude-opus-4-6"`, `COMMIT_MODEL="haiku"`
+
 This repo's `audit.conf`: `START_DIRS=(".")`, `FILE_EXTENSIONS="sh"`.
 
 ### Environment Variables
 
 - `SIGMA_PROJECT_ROOT` — override auto-detected project root
-
-### Constants
-
-- `MAX_LOC=3000` in `run-audit.sh` (override with `--max-loc`; `--combined` auto-sets 2000)
-- `MAX_FIX_LOC=2000` in `run-fixes.sh`
 
 ## Troubleshooting
 

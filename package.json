@@ -2,7 +2,10 @@
   "private": true,
   "scripts": {
     "check": "shellcheck *.sh",
-    "format": "shfmt -w -i 4 -ci *.sh"
+    "format": "shfmt -w -i 4 -ci *.sh",
+    "test": "bats test/",
+    "test:unit": "bats test/lib.bats test/lib-fixes.bats test/logging.bats",
+    "test:integration": "bats test/database.bats"
   },
   "devDependencies": {
     "shellcheck": "^4.1.0"

@@ -15,8 +15,7 @@ set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 init_paths
 
-# Configuration
-MAX_LOC=3000 # Upper limit on total lines per branch
+# MAX_LOC is set by lib.sh init_paths (default 3000, overridable via audit.conf)
 
 # ---------------------------------------------------------------------------
 # Usage / help
@@ -394,7 +393,7 @@ process_branch() {
     output=$(printf '%s' "$prompt" | claude \
         --print \
         --no-session-persistence \
-        --model opus \
+        --model "$AUDIT_MODEL" \
         --output-format json \
         --max-turns 100 \
         --json-schema "$JSON_SCHEMA" \

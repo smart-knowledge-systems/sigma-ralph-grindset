@@ -20,7 +20,7 @@ init_paths
 
 # Configuration
 MAX_RETRIES=3
-MAX_FIX_LOC=2000 # Lower than audit's 3000 — fix context is heavier
+# MAX_FIX_LOC is set by lib.sh init_paths (default 2000, overridable via audit.conf)
 FIX_BRANCH="fix/audit-improvements"
 
 # ---------------------------------------------------------------------------
@@ -377,7 +377,7 @@ fix_batch() {
         # Run Claude fix agent
         local claude_output=""
         local claude_args=(
-            --model claude-opus-4-6
+            --model "$FIX_MODEL"
             --permission-mode bypassPermissions
             --append-system-prompt "$(cat "$SYSTEM_PROMPT_FILE")"
         )
@@ -418,7 +418,7 @@ ${batch_label} (${file_count} files, ${issue_count} issues) based on project cod
 Use /git-commit-manager" | claude \
                     --print \
                     --no-session-persistence \
-                    --model haiku \
+                    --model "$COMMIT_MODEL" \
                     --permission-mode bypassPermissions
             else
                 printf '%s\n' "  Skipping commit (--dangerously-skip-commits)"
@@ -506,7 +506,7 @@ print_summary() {
 # ============================================================================
 
 main() {
-    printf '%s\n' "=== Read by Ear — Fix Audit Issues ==="
+    printf '%s\n' "=== Fix Audit Issues ==="
     printf '%s\n' ""
 
     # Preflight checks

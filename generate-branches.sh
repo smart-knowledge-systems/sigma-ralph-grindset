@@ -18,7 +18,7 @@ set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 init_paths
 
-MAX_LOC=3000
+# MAX_LOC is set by lib.sh init_paths (default 3000, overridable via audit.conf)
 
 # ---------------------------------------------------------------------------
 # Usage / help

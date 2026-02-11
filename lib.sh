@@ -56,6 +56,13 @@ init_paths() {
     if [[ -z "${FILE_EXTENSIONS:-}" ]]; then
         FILE_EXTENSIONS="ts tsx"
     fi
+    # LOC limits (overridable via audit.conf; run-audit.sh --max-loc still wins)
+    : "${MAX_LOC:=3000}"
+    : "${MAX_FIX_LOC:=2000}"
+    # Claude model defaults (overridable via audit.conf)
+    : "${AUDIT_MODEL:=opus}"
+    : "${FIX_MODEL:=claude-opus-4-6}"
+    : "${COMMIT_MODEL:=haiku}"
     # START_DIRS default is set after sourcing audit.conf (see below)
 
     # Source project-level config if it exists
@@ -77,6 +84,7 @@ init_paths() {
     fi
 
     export AUDIT_DIR PROJECT_ROOT DB_PATH BRANCHES_FILE POLICIES_DIR FILE_EXTENSIONS
+    export MAX_LOC MAX_FIX_LOC AUDIT_MODEL FIX_MODEL COMMIT_MODEL
 }
 
 # ---------------------------------------------------------------------------
@@ -302,7 +310,7 @@ find_source_files() {
 }
 
 # Resolve TypeScript import path aliases to real paths.
-# Handles @/ear-reader/*, @/convex/*, @/* aliases.
+# Handles @/convex/*, @/* aliases.
 # Args: $1 — import path
 # Output: resolved path to stdout (empty if external package)
 resolve_alias() {
@@ -315,9 +323,7 @@ resolve_alias() {
     fi
 
     # Resolve path aliases
-    if [[ "$import_path" =~ ^@/ear-reader/ ]]; then
-        printf '%s\n' "${import_path/@\/ear-reader/src/components/ear-reader}"
-    elif [[ "$import_path" =~ ^@/convex/ ]]; then
+    if [[ "$import_path" =~ ^@/convex/ ]]; then
         printf '%s\n' "${import_path/@\/convex/convex}"
     elif [[ "$import_path" =~ ^@/ ]]; then
         printf '%s\n' "${import_path/@\//src/}"
