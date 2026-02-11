@@ -60,8 +60,8 @@ init_paths() {
     : "${MAX_LOC:=3000}"
     : "${MAX_FIX_LOC:=2000}"
     # Claude model defaults (overridable via audit.conf)
-    : "${AUDIT_MODEL:=opus}"
-    : "${FIX_MODEL:=claude-opus-4-6}"
+    : "${AUDIT_MODEL:=haiku}"
+    : "${FIX_MODEL:=sonnet}"
     : "${COMMIT_MODEL:=haiku}"
     # START_DIRS default is set after sourcing audit.conf (see below)
 
@@ -394,6 +394,19 @@ file_to_branch() {
     for i in "${!LIB_BRANCH_PATHS[@]}"; do
         local bp="${LIB_BRANCH_PATHS[$i]}"
         local is_flat="${LIB_BRANCH_IS_FLAT[$i]}"
+
+        if [[ "$bp" == "." ]]; then
+            # Root branch: all files live under "."
+            if [[ -n "$is_flat" ]] && [[ "$file_path" == *"/"* ]]; then
+                continue
+            fi
+            # "." (length 1) loses to any longer prefix match
+            if ((1 > best_len)); then
+                best_match="."
+                best_len=1
+            fi
+            continue
+        fi
 
         # File must start with branch path + /
         if [[ "$file_path" != "${bp}/"* ]]; then
