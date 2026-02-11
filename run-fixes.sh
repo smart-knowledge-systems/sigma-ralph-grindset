@@ -18,6 +18,12 @@ set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 init_paths
 
+# Validate required variables from lib.sh (Issue 1: Input Validation)
+if [[ -z "${MAX_FIX_LOC-}" ]]; then
+    log_error "MAX_FIX_LOC not set by lib.sh"
+    exit 1
+fi
+
 # Configuration
 MAX_RETRIES=3
 # MAX_FIX_LOC is set by lib.sh init_paths (default 2000, overridable via audit.conf)
@@ -80,7 +86,7 @@ if [[ -n "$POLICY_FILTER" ]]; then
         log_error "Policy not found: ${POLICY_FILTER}"
         exit 1
     fi
-    printf '%s\n' "Filtering fixes to policy: ${POLICY_FILTER}"
+    log_info "Filtering fixes to policy: ${POLICY_FILTER}"
 fi
 
 if [[ "$SKIP_COMMITS" == "true" ]]; then
@@ -180,6 +186,7 @@ get_fix_files_with_loc() {
             printf '%s\n' "${file_path}|${loc}"
         else
             # File no longer exists — include with 0 LOC so issues still get processed
+            log_warn "File no longer exists: ${file_path}"
             printf '%s\n' "${file_path}|0"
         fi
     done <<<"$file_paths"
@@ -396,6 +403,7 @@ fix_batch() {
 
         # Run Claude fix agent
         local claude_output=""
+        local claude_exit_code=0
         local claude_args=(
             --model "$FIX_MODEL"
             --permission-mode bypassPermissions
@@ -403,11 +411,17 @@ fix_batch() {
         )
         if [[ "$INTERACTIVE" == "true" ]]; then
             # Interactive mode: run Claude directly (no --print, no capture)
-            printf '%s\n' "$prompt" | claude "${claude_args[@]}" || true
+            if ! printf '%s\n' "$prompt" | claude "${claude_args[@]}"; then
+                claude_exit_code=$?
+                log_error "Claude CLI failed for ${batch_label}: exit code ${claude_exit_code}"
+            fi
         else
             # Print mode: capture output for DB storage
             claude_args+=(--print --no-session-persistence)
-            claude_output=$(printf '%s\n' "$prompt" | claude "${claude_args[@]}" 2>&1) || true
+            if ! claude_output=$(printf '%s\n' "$prompt" | claude "${claude_args[@]}" 2>&1); then
+                claude_exit_code=$?
+                log_error "Claude CLI failed for ${batch_label}: exit code ${claude_exit_code}"
+            fi
         fi
 
         # Store truncated Claude output in the database (empty in interactive mode).
@@ -420,16 +434,21 @@ fix_batch() {
             WHERE id = ${attempt_id};
         "
 
-        # Run bun check
+        # Run bun check (Issue 3: Explicit return code checks)
         local check_output
         local check_exit=0
-        check_output=$(cd "$PROJECT_ROOT" && bun check 2>&1) || check_exit=$?
+        if ! check_output=$(cd "$PROJECT_ROOT" && bun check 2>&1); then
+            check_exit=$?
+        fi
 
         if [[ "$check_exit" -eq 0 ]]; then
             printf '%s\n' "  bun check passed"
 
-            # Format
-            (cd "$PROJECT_ROOT" && bun format)
+            # Format (Issue 3: Explicit return code checks)
+            if ! (cd "$PROJECT_ROOT" && bun format); then
+                log_error "bun format failed for ${batch_label}"
+                return 1
+            fi
 
             # Commit via Claude (skip when --dangerously-skip-commits is set)
             if [[ "$SKIP_COMMITS" != "true" ]]; then
@@ -459,7 +478,9 @@ Use /git-commit-manager" | claude \
             "
             return 0
         else
-            log_warn "bun check failed (attempt ${attempt}/${MAX_RETRIES})"
+            # Issue 7: Log diagnostic output for bun check failures
+            log_warn "bun check failed (attempt ${attempt}/${MAX_RETRIES}):"
+            printf '%s\n' "$check_output" >&2
 
             # Log failure with truncated output (build tool output may leak
             # env vars or infrastructure paths, so limit what we persist)
@@ -661,7 +682,10 @@ main() {
         fi
 
         # Build system prompt scoped to relevant policies only
-        rm -f "$SYSTEM_PROMPT_FILE"
+        # Issue 2: Clean up old temp file before creating new one
+        if [[ -f "$SYSTEM_PROMPT_FILE" ]]; then
+            rm -f "$SYSTEM_PROMPT_FILE"
+        fi
         build_system_prompt "${policies[@]}"
 
         local prompt
