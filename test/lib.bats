@@ -191,6 +191,7 @@ setup() {
 
 @test "build_find_ext_array: single extension builds correct find args" {
     FILE_EXTENSIONS="sh"
+    EXCLUDE_DIRS=()
     build_find_ext_array
     # Expected: ( -name *.sh )
     assert_equal "${EXT_FIND_ARGS[0]}" "("
@@ -202,6 +203,7 @@ setup() {
 
 @test "build_find_ext_array: multiple extensions include -o separators" {
     FILE_EXTENSIONS="ts tsx"
+    EXCLUDE_DIRS=()
     build_find_ext_array
     # Expected: ( -name *.ts -o -name *.tsx )
     assert_equal "${EXT_FIND_ARGS[0]}" "("
@@ -212,6 +214,112 @@ setup() {
     assert_equal "${EXT_FIND_ARGS[5]}" "*.tsx"
     assert_equal "${EXT_FIND_ARGS[6]}" ")"
     assert_equal "${#EXT_FIND_ARGS[@]}" 7
+}
+
+@test "build_find_ext_array: includes exclusion patterns before extensions" {
+    FILE_EXTENSIONS="ts"
+    EXCLUDE_DIRS=("convex/_generated")
+    build_find_ext_array
+    # Expected: -not -path */convex/_generated/* ( -name *.ts )
+    assert_equal "${EXT_FIND_ARGS[0]}" "-not"
+    assert_equal "${EXT_FIND_ARGS[1]}" "-path"
+    assert_equal "${EXT_FIND_ARGS[2]}" "*/convex/_generated/*"
+    assert_equal "${EXT_FIND_ARGS[3]}" "("
+    assert_equal "${EXT_FIND_ARGS[4]}" "-name"
+    assert_equal "${EXT_FIND_ARGS[5]}" "*.ts"
+    assert_equal "${EXT_FIND_ARGS[6]}" ")"
+    assert_equal "${#EXT_FIND_ARGS[@]}" 7
+}
+
+@test "build_find_ext_array: multiple exclusion dirs" {
+    FILE_EXTENSIONS="sh"
+    EXCLUDE_DIRS=("node_modules" "dist")
+    build_find_ext_array
+    # Expected: -not -path */node_modules/* -not -path */dist/* ( -name *.sh )
+    assert_equal "${EXT_FIND_ARGS[0]}" "-not"
+    assert_equal "${EXT_FIND_ARGS[1]}" "-path"
+    assert_equal "${EXT_FIND_ARGS[2]}" "*/node_modules/*"
+    assert_equal "${EXT_FIND_ARGS[3]}" "-not"
+    assert_equal "${EXT_FIND_ARGS[4]}" "-path"
+    assert_equal "${EXT_FIND_ARGS[5]}" "*/dist/*"
+    assert_equal "${EXT_FIND_ARGS[6]}" "("
+    assert_equal "${EXT_FIND_ARGS[7]}" "-name"
+    assert_equal "${EXT_FIND_ARGS[8]}" "*.sh"
+    assert_equal "${EXT_FIND_ARGS[9]}" ")"
+    assert_equal "${#EXT_FIND_ARGS[@]}" 10
+}
+
+@test "build_find_ext_array: empty EXCLUDE_DIRS adds no exclusion args" {
+    FILE_EXTENSIONS="sh"
+    EXCLUDE_DIRS=()
+    build_find_ext_array
+    # Same as without exclusions: ( -name *.sh )
+    assert_equal "${EXT_FIND_ARGS[0]}" "("
+    assert_equal "${#EXT_FIND_ARGS[@]}" 4
+}
+
+# ============================================================================
+# is_excluded_path — directory exclusion filtering
+# ============================================================================
+
+@test "is_excluded_path: file in excluded dir returns success" {
+    EXCLUDE_DIRS=("convex/_generated")
+    run is_excluded_path "convex/_generated/api.d.ts"
+    assert_success
+}
+
+@test "is_excluded_path: file NOT in excluded dir returns failure" {
+    EXCLUDE_DIRS=("convex/_generated")
+    run is_excluded_path "convex/schema.ts"
+    assert_failure
+}
+
+@test "is_excluded_path: deeply nested file in excluded dir returns success" {
+    EXCLUDE_DIRS=("convex/_generated")
+    run is_excluded_path "convex/_generated/dataModel.d.ts"
+    assert_success
+}
+
+@test "is_excluded_path: exact dir match returns success" {
+    EXCLUDE_DIRS=("convex/_generated")
+    run is_excluded_path "convex/_generated"
+    assert_success
+}
+
+@test "is_excluded_path: empty EXCLUDE_DIRS returns failure" {
+    EXCLUDE_DIRS=()
+    run is_excluded_path "convex/_generated/api.d.ts"
+    assert_failure
+}
+
+@test "is_excluded_path: unset EXCLUDE_DIRS returns failure" {
+    unset EXCLUDE_DIRS
+    run is_excluded_path "convex/_generated/api.d.ts"
+    assert_failure
+}
+
+@test "is_excluded_path: strips ./ prefix from input" {
+    EXCLUDE_DIRS=("convex/_generated")
+    run is_excluded_path "./convex/_generated/api.d.ts"
+    assert_success
+}
+
+@test "is_excluded_path: strips ./ prefix from EXCLUDE_DIRS entries" {
+    EXCLUDE_DIRS=("./convex/_generated")
+    run is_excluded_path "convex/_generated/api.d.ts"
+    assert_success
+}
+
+@test "is_excluded_path: multiple excluded dirs" {
+    EXCLUDE_DIRS=("node_modules" "convex/_generated")
+    run is_excluded_path "convex/_generated/api.d.ts"
+    assert_success
+}
+
+@test "is_excluded_path: partial prefix does NOT match" {
+    EXCLUDE_DIRS=("convex/_gen")
+    run is_excluded_path "convex/_generated/api.d.ts"
+    assert_failure
 }
 
 # ============================================================================
@@ -310,6 +418,178 @@ setup() {
     # NOT "src (flat)"
     run file_to_branch "src/lib/utils/format.ts"
     assert_output "src/lib/utils"
+}
+
+# ============================================================================
+# parse_file_ref — line notation splitting
+# ============================================================================
+
+@test "parse_file_ref: splits line range from path" {
+    parse_file_ref "convex/analytics.ts:14-22"
+    assert_equal "$PARSED_PATH" "convex/analytics.ts"
+    assert_equal "$PARSED_LINES" "14-22"
+}
+
+@test "parse_file_ref: splits single line number from path" {
+    parse_file_ref "convex/analytics.ts:97"
+    assert_equal "$PARSED_PATH" "convex/analytics.ts"
+    assert_equal "$PARSED_LINES" "97"
+}
+
+@test "parse_file_ref: no notation leaves path intact" {
+    parse_file_ref "convex/analytics.ts"
+    assert_equal "$PARSED_PATH" "convex/analytics.ts"
+    assert_equal "$PARSED_LINES" ""
+}
+
+@test "parse_file_ref: colon not followed by digit does not split" {
+    parse_file_ref "src/http://example.ts"
+    assert_equal "$PARSED_PATH" "src/http://example.ts"
+    assert_equal "$PARSED_LINES" ""
+}
+
+@test "parse_file_ref: empty string" {
+    parse_file_ref ""
+    assert_equal "$PARSED_PATH" ""
+    assert_equal "$PARSED_LINES" ""
+}
+
+# ============================================================================
+# get_diff_files — git diff integration
+# ============================================================================
+
+# Helper: set up a temporary git repo with initial commit
+_setup_git_repo() {
+    cd "$BATS_TEST_TMPDIR"
+    git init -q .
+    git config user.email "test@test.com"
+    git config user.name "Test"
+    # Need at least one commit for diff to work
+    printf 'init\n' >README.md
+    git add README.md
+    git commit -q -m "init"
+    PROJECT_ROOT="$BATS_TEST_TMPDIR"
+}
+
+@test "get_diff_files: returns unstaged modified files" {
+    _setup_git_repo
+    FILE_EXTENSIONS="sh"
+    EXCLUDE_DIRS=()
+
+    printf '#!/bin/bash\n' >script.sh
+    git add script.sh
+    git commit -q -m "add script"
+
+    # Modify the file (unstaged change)
+    printf '#!/bin/bash\necho hello\n' >script.sh
+
+    run get_diff_files
+    assert_success
+    assert_output "${BATS_TEST_TMPDIR}/script.sh"
+}
+
+@test "get_diff_files: returns untracked files matching extensions" {
+    _setup_git_repo
+    FILE_EXTENSIONS="sh"
+    EXCLUDE_DIRS=()
+
+    printf '#!/bin/bash\n' >new-script.sh
+
+    run get_diff_files
+    assert_success
+    assert_output "${BATS_TEST_TMPDIR}/new-script.sh"
+}
+
+@test "get_diff_files: skips files not matching extensions" {
+    _setup_git_repo
+    FILE_EXTENSIONS="sh"
+    EXCLUDE_DIRS=()
+
+    printf 'hello\n' >notes.txt
+
+    run get_diff_files
+    assert_success
+    assert_output ""
+}
+
+@test "get_diff_files: skips excluded paths" {
+    _setup_git_repo
+    FILE_EXTENSIONS="sh"
+    EXCLUDE_DIRS=("vendor")
+
+    mkdir -p vendor
+    printf '#!/bin/bash\n' >vendor/lib.sh
+
+    run get_diff_files
+    assert_success
+    assert_output ""
+}
+
+@test "get_diff_files: skips deleted files" {
+    _setup_git_repo
+    FILE_EXTENSIONS="sh"
+    EXCLUDE_DIRS=()
+
+    printf '#!/bin/bash\n' >to-delete.sh
+    git add to-delete.sh
+    git commit -q -m "add file"
+
+    rm to-delete.sh
+
+    run get_diff_files
+    assert_success
+    # Deleted file should not appear (--diff-filter=d excludes it,
+    # and the exists-on-disk check catches untracked deletions)
+    assert_output ""
+}
+
+@test "get_diff_files: with ref returns files changed since that commit" {
+    _setup_git_repo
+    FILE_EXTENSIONS="sh"
+    EXCLUDE_DIRS=()
+
+    printf '#!/bin/bash\n' >old.sh
+    git add old.sh
+    git commit -q -m "add old"
+
+    local ref
+    ref=$(git -C "$BATS_TEST_TMPDIR" rev-parse HEAD)
+
+    printf '#!/bin/bash\necho new\n' >new.sh
+    git add new.sh
+    git commit -q -m "add new"
+
+    run get_diff_files "$ref"
+    assert_success
+    assert_output "${BATS_TEST_TMPDIR}/new.sh"
+}
+
+@test "get_diff_files: no changes returns empty output" {
+    _setup_git_repo
+    FILE_EXTENSIONS="sh"
+    EXCLUDE_DIRS=()
+
+    run get_diff_files
+    assert_success
+    assert_output ""
+}
+
+@test "get_diff_files: deduplicates files appearing in multiple git outputs" {
+    _setup_git_repo
+    FILE_EXTENSIONS="sh"
+    EXCLUDE_DIRS=()
+
+    printf '#!/bin/bash\n' >dup.sh
+    git add dup.sh
+    # File is both staged and has unstaged modifications
+    printf '#!/bin/bash\necho modified\n' >dup.sh
+
+    run get_diff_files
+    assert_success
+    # Should appear exactly once despite being in both staged and unstaged
+    local line_count
+    line_count=$(printf '%s\n' "$output" | grep -c "dup.sh" || true)
+    assert_equal "$line_count" "1"
 }
 
 @test "load_branches_for_matching: parses flat suffix correctly" {

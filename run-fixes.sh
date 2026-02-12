@@ -259,7 +259,8 @@ get_issues_for_files() {
             i.rule,
             i.severity,
             i.suggestion,
-            GROUP_CONCAT(f.path, '|') as file_paths
+            GROUP_CONCAT(f.path, '|') as file_paths,
+            GROUP_CONCAT(jf.lines, '|') as line_ranges
         FROM issues i
         JOIN issue_files jf ON jf.issue_id = i.id
         JOIN files f ON jf.file_id = f.id
@@ -360,15 +361,33 @@ build_fix_prompt() {
     local issue_num=0
     while IFS= read -r issue; do
         ((issue_num++)) || true
-        local description severity rule suggestion file_paths
+        local description severity rule suggestion raw_paths raw_lines
         description=$(printf '%s\n' "$issue" | jq -r '.description')
         severity=$(printf '%s\n' "$issue" | jq -r '.severity')
         rule=$(printf '%s\n' "$issue" | jq -r '.rule')
         suggestion=$(printf '%s\n' "$issue" | jq -r '.suggestion')
-        file_paths=$(printf '%s\n' "$issue" | jq -r '.file_paths' | tr '|' '\n' | sort -u | sed 's/^/- /')
+        raw_paths=$(printf '%s\n' "$issue" | jq -r '.file_paths')
+        raw_lines=$(printf '%s\n' "$issue" | jq -r '.line_ranges // ""')
+
+        # Build file list with line ranges (paths and lines are pipe-separated, positionally aligned)
+        local file_list=""
+        local i=0
+        local IFS_BAK="$IFS"
+        IFS='|' read -ra path_arr <<<"$raw_paths"
+        IFS='|' read -ra lines_arr <<<"$raw_lines"
+        IFS="$IFS_BAK"
+        for fp in "${path_arr[@]}"; do
+            local lr="${lines_arr[$i]:-}"
+            if [[ -n "$lr" ]]; then
+                file_list+="- \`${fp}\` (lines ${lr})\n"
+            else
+                file_list+="- \`${fp}\`\n"
+            fi
+            ((i++)) || true
+        done
 
         prompt+="### Issue ${issue_num} (${severity}) — rule: ${rule}\n"
-        prompt+="**Files:**\n${file_paths}\n"
+        prompt+="**Files:**\n${file_list}"
         prompt+="**Problem:** ${description}\n"
         prompt+="**Suggestion:** ${suggestion}\n\n"
     done < <(printf '%s\n' "$issues_json" | jq -c '.[]')
@@ -579,9 +598,11 @@ main() {
     # Extend DB schema for fix tracking
     extend_schema
 
-    # Load branch definitions (needed by lib.sh for file_to_branch, unused here
-    # but required by the shared library contract)
-    load_branches_for_matching
+    # Load branch definitions if available (needed by lib.sh for file_to_branch).
+    # May not exist after a diff-only audit where branches.txt was never generated.
+    if [[ -f "$BRANCHES_FILE" ]]; then
+        load_branches_for_matching
+    fi
 
     # Progress footer
     source "${AUDIT_DIR}/progress.sh"

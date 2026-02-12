@@ -83,6 +83,11 @@ init_paths() {
         source "${AUDIT_DIR}/audit.conf"
     fi
 
+    # Default EXCLUDE_DIRS if not set by audit.conf or caller
+    if [[ -z "${EXCLUDE_DIRS+x}" ]]; then
+        EXCLUDE_DIRS=()
+    fi
+
     # Default START_DIRS if not set by audit.conf or caller
     if [[ -z "${START_DIRS+x}" ]]; then
         START_DIRS=(
@@ -117,7 +122,19 @@ init_paths() {
 #   find "$dir" "${EXT_FIND_ARGS[@]}" -type f
 EXT_FIND_ARGS=()
 build_find_ext_array() {
-    EXT_FIND_ARGS=("(")
+    EXT_FIND_ARGS=()
+
+    # Exclusion patterns (before extension matching for short-circuit)
+    if [[ -n "${EXCLUDE_DIRS+x}" ]] && [[ ${#EXCLUDE_DIRS[@]} -gt 0 ]]; then
+        local excl_dir
+        for excl_dir in "${EXCLUDE_DIRS[@]}"; do
+            local clean="${excl_dir#./}"
+            EXT_FIND_ARGS+=(-not -path "*/${clean}/*")
+        done
+    fi
+
+    # Extension matching
+    EXT_FIND_ARGS+=("(")
     local first=1
     for ext in $FILE_EXTENSIONS; do
         if [[ $first -eq 1 ]]; then
@@ -136,6 +153,24 @@ matches_extensions() {
     local filename="$1"
     for ext in $FILE_EXTENSIONS; do
         if [[ "$filename" == *".${ext}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Check if a file path falls under an excluded directory.
+# Args: $1 — file path (relative to PROJECT_ROOT, no ./ prefix)
+# Returns: 0 if excluded, 1 if not excluded
+is_excluded_path() {
+    local file_path="${1#./}"
+    if [[ -z "${EXCLUDE_DIRS+x}" ]] || [[ ${#EXCLUDE_DIRS[@]} -eq 0 ]]; then
+        return 1
+    fi
+    local excl_dir
+    for excl_dir in "${EXCLUDE_DIRS[@]}"; do
+        local clean="${excl_dir#./}"
+        if [[ "$file_path" == "$clean"/* ]] || [[ "$file_path" == "$clean" ]]; then
             return 0
         fi
     done
@@ -196,6 +231,37 @@ truncate_for_db() {
     else
         printf '%s' "${value:0:$max_chars}... [truncated]"
     fi
+}
+
+# Split a file reference like "path:14-22" into clean path + line range.
+# Sets two globals: PARSED_PATH and PARSED_LINES.
+# Only splits on colon when the part after it starts with a digit
+# (avoids splitting Windows-style paths or URLs).
+#
+# Usage:
+#   parse_file_ref "convex/analytics.ts:14-22"
+#   echo "$PARSED_PATH"   # convex/analytics.ts
+#   echo "$PARSED_LINES"  # 14-22
+PARSED_PATH=""
+PARSED_LINES=""
+parse_file_ref() {
+    local raw="$1"
+    PARSED_PATH="$raw"
+    PARSED_LINES=""
+
+    # Check if there's a colon in the string
+    case "$raw" in
+        *:*)
+            local after="${raw##*:}"
+            # Only split if the part after the last colon starts with a digit
+            case "$after" in
+                [0-9]*)
+                    PARSED_PATH="${raw%:*}"
+                    PARSED_LINES="$after"
+                    ;;
+            esac
+            ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -288,6 +354,43 @@ SQL
     # Idempotent migration: add policy column to issues (for combined mode per-issue tracking)
     db "ALTER TABLE issues ADD COLUMN policy TEXT DEFAULT '';" 2>/dev/null || true
 
+    # Idempotent migration: add lines column to issue_files (stores line ranges like "14-22")
+    db "ALTER TABLE issue_files ADD COLUMN lines TEXT DEFAULT '';" 2>/dev/null || true
+
+    # One-time migration: clean line notation from files.path (e.g., "foo.ts:14-22" → "foo.ts")
+    # and move the line range into issue_files.lines.
+    local polluted_count
+    polluted_count=$(db "SELECT COUNT(*) FROM files WHERE path GLOB '*:[0-9]*';")
+    if [[ "$polluted_count" -gt 0 ]]; then
+        log_info "Migrating ${polluted_count} file paths with line notation..."
+        db "BEGIN TRANSACTION;"
+
+        local old_id old_path clean_path lines existing_id
+        while IFS='|' read -r old_id old_path; do
+            [[ -z "$old_id" ]] && continue
+            parse_file_ref "$old_path"
+            clean_path="$PARSED_PATH"
+            lines="$PARSED_LINES"
+
+            # Check if the clean path already exists
+            existing_id=$(db "SELECT id FROM files WHERE path='$(sql_escape "$clean_path")';")
+
+            if [[ -n "$existing_id" ]]; then
+                # Clean path already exists: repoint issue_files and set lines
+                db "UPDATE issue_files SET file_id=${existing_id}, lines='$(sql_escape "$lines")' WHERE file_id=${old_id};"
+                # Delete the orphaned polluted entry
+                db "DELETE FROM files WHERE id=${old_id};"
+            else
+                # Clean path doesn't exist: update in place
+                db "UPDATE files SET path='$(sql_escape "$clean_path")' WHERE id=${old_id};"
+                db "UPDATE issue_files SET lines='$(sql_escape "$lines")' WHERE file_id=${old_id};"
+            fi
+        done < <(db "SELECT id, path FROM files WHERE path GLOB '*:[0-9]*';")
+
+        db "COMMIT;"
+        log_info "Migration complete."
+    fi
+
     # Release lock
     [[ -n "$got_lock" ]] && rmdir "$lockdir" 2>/dev/null
 }
@@ -321,6 +424,69 @@ find_source_files() {
     else
         find "$dir" "${EXT_FIND_ARGS[@]}" -type f 2>/dev/null || true
     fi
+}
+
+# Collect files changed in the working tree (optionally since a git ref).
+# Filters through matches_extensions() and is_excluded_path(); skips deleted
+# files and verifies each path exists on disk. Outputs absolute paths (one
+# per line), matching find_source_files output format.
+#
+# Args: $1 — git ref (optional). When omitted, only uncommitted changes are
+#       returned (staged + unstaged + untracked).
+# Globals: PROJECT_ROOT, FILE_EXTENSIONS, EXCLUDE_DIRS (read)
+get_diff_files() {
+    local ref="${1:-}"
+    local raw_files=""
+
+    if [[ -n "$ref" ]]; then
+        # Changes between ref and working tree (covers committed + uncommitted)
+        raw_files=$(git -C "$PROJECT_ROOT" diff --name-only --diff-filter=d "$ref" 2>/dev/null || true)
+    else
+        # Staged changes
+        raw_files=$(git -C "$PROJECT_ROOT" diff --cached --name-only --diff-filter=d 2>/dev/null || true)
+        # Unstaged changes (append)
+        local unstaged
+        unstaged=$(git -C "$PROJECT_ROOT" diff --name-only --diff-filter=d 2>/dev/null || true)
+        if [[ -n "$unstaged" ]]; then
+            raw_files="${raw_files}"$'\n'"${unstaged}"
+        fi
+    fi
+
+    # Untracked files (always included — new files not yet committed)
+    local untracked
+    untracked=$(git -C "$PROJECT_ROOT" ls-files --others --exclude-standard 2>/dev/null || true)
+    if [[ -n "$untracked" ]]; then
+        raw_files="${raw_files}"$'\n'"${untracked}"
+    fi
+
+    # Deduplicate, filter, and emit absolute paths
+    local seen=""
+    local file abs_path
+    while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+
+        # Deduplicate
+        case "$seen" in
+            *"|${file}|"*) continue ;;
+        esac
+        seen="${seen}|${file}|"
+
+        # Extension filter
+        if ! matches_extensions "$file"; then
+            continue
+        fi
+
+        # Exclusion filter
+        if is_excluded_path "$file"; then
+            continue
+        fi
+
+        # Verify file exists on disk
+        abs_path="${PROJECT_ROOT}/${file}"
+        if [[ -f "$abs_path" ]]; then
+            printf '%s\n' "$abs_path"
+        fi
+    done <<<"$raw_files"
 }
 
 # Resolve TypeScript import path aliases to real paths.

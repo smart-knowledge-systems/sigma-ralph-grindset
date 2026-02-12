@@ -89,6 +89,11 @@ process_dir() {
     local dir="$1"
     local rel_path="${dir#"${PROJECT_ROOT}"/}"
 
+    # Skip excluded directories
+    if is_excluded_path "$rel_path"; then
+        return
+    fi
+
     # Skip if directory doesn't exist
     [[ ! -d "$dir" ]] && return
 
@@ -244,6 +249,9 @@ main() {
                 if [[ -n "$changed_files" ]]; then
                     while IFS= read -r file; do
                         if ! matches_extensions "$file"; then
+                            continue
+                        fi
+                        if is_excluded_path "$file"; then
                             continue
                         fi
                         local branch
