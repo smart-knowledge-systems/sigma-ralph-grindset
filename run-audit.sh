@@ -439,17 +439,21 @@ process_branch() {
     system_prompt_file=$(build_system_prompt "${POLICY_NAMES[@]}")
     TEMP_FILES+=("$system_prompt_file")
 
-    # Call Claude CLI
+    # Call Claude CLI (unset CLAUDECODE to avoid nested-session detection;
+    # capture stderr separately so it doesn't corrupt the JSON output)
     local output
     local claude_exit_code=0
-    output=$(printf '%s' "$prompt" | claude \
+    local claude_stderr
+    claude_stderr=$(mktemp)
+    TEMP_FILES+=("$claude_stderr")
+    output=$(printf '%s' "$prompt" | CLAUDECODE='' claude \
         --print \
         --no-session-persistence \
         --model "$AUDIT_MODEL" \
         --output-format json \
         --max-turns 100 \
         --json-schema "$JSON_SCHEMA" \
-        --append-system-prompt "$(cat "$system_prompt_file")" 2>&1) || claude_exit_code=$?
+        --append-system-prompt "$(cat "$system_prompt_file")" 2>"$claude_stderr") || claude_exit_code=$?
 
     # Clean up temp file
     rm -f "$system_prompt_file"
@@ -458,7 +462,7 @@ process_branch() {
     # (raw stderr may contain request details or auth-related info)
     if [[ $claude_exit_code -ne 0 ]]; then
         local truncated_err
-        truncated_err=$(truncate_for_db "$output" 500)
+        truncated_err=$(truncate_for_db "$(cat "$claude_stderr")" 500)
         local error_msg
         error_msg="exit_code=${claude_exit_code}: $(sql_escape "$truncated_err")"
         db "UPDATE scans SET status='failed', error_message='$error_msg', completed_at=strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id=$scan_id;"
@@ -468,8 +472,12 @@ process_branch() {
 
     # Parse JSON output (structured_output contains the schema-validated data)
     local result_json
-    result_json=$(printf '%s\n' "$output" | jq -c '.structured_output' 2>/dev/null) || {
-        db "UPDATE scans SET status='failed', error_message='JSON parse error', completed_at=strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id=$scan_id;"
+    result_json=$(printf '%s\n' "$output" | jq -c '.[-1].structured_output' 2>/dev/null) || {
+        local truncated_raw
+        truncated_raw=$(truncate_for_db "$output" 500)
+        local escaped_raw
+        escaped_raw=$(sql_escape "$truncated_raw")
+        db "UPDATE scans SET status='failed', error_message='JSON parse error: $escaped_raw', completed_at=strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id=$scan_id;"
         log_error "Failed to parse JSON for ${branch_label}"
         return 1
     }
