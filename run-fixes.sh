@@ -112,12 +112,11 @@ setup_git() {
         exit 1
     fi
 
-    # Create or switch to fix branch
+    # Delete stale fix branch if it exists, then create fresh from current HEAD
     if git -C "$PROJECT_ROOT" show-ref --verify --quiet "refs/heads/${FIX_BRANCH}"; then
-        git -C "$PROJECT_ROOT" checkout "$FIX_BRANCH"
-    else
-        git -C "$PROJECT_ROOT" checkout -b "$FIX_BRANCH"
+        git -C "$PROJECT_ROOT" branch -D "$FIX_BRANCH"
     fi
+    git -C "$PROJECT_ROOT" checkout -b "$FIX_BRANCH"
 }
 
 # ============================================================================
