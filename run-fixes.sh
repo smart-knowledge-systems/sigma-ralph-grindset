@@ -27,7 +27,7 @@ fi
 # Configuration
 MAX_RETRIES=3
 # MAX_FIX_LOC is set by lib.sh init_paths (default 2000, overridable via audit.conf)
-FIX_BRANCH="fix/audit-improvements"
+FIX_BRANCH="fix/audit-improvements-$(git -C "${PROJECT_ROOT:-.}" rev-parse --short HEAD)"
 
 # ---------------------------------------------------------------------------
 # Usage / help
