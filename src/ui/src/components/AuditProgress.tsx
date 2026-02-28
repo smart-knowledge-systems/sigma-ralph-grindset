@@ -82,17 +82,7 @@ export default function AuditProgress({ audits }: Props) {
                     {path}
                   </span>
                   <span style={fileBadge}>{branch.fileCount} files</span>
-                  <StatusBadge
-                    status={
-                      branch.status === "running"
-                        ? "running"
-                        : branch.status === "done"
-                          ? "done"
-                          : branch.status === "failed"
-                            ? "failed"
-                            : "pending"
-                    }
-                  />
+                  <StatusBadge status={branch.status} />
                   <span style={issueCount}>
                     {branch.status === "done" ? branch.issueCount : "\u2014"}
                   </span>

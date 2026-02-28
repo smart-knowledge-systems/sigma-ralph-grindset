@@ -312,7 +312,8 @@ export function startServer(): { port: number; stop: () => Promise<void> } {
             !body ||
             typeof body !== "object" ||
             typeof body.approved !== "boolean" ||
-            typeof body.requestId !== "string"
+            typeof body.requestId !== "string" ||
+            body.requestId.length === 0
           ) {
             return Response.json(
               {

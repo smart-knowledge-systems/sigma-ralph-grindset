@@ -22,6 +22,7 @@ export default function FixProgress({ fix }: Props) {
     () =>
       Object.entries(fix.batches)
         .map(([k, v]) => ({ num: Number(k), ...v }))
+        .filter((b) => !Number.isNaN(b.num))
         .sort((a, b) => a.num - b.num),
     [fix.batches],
   );

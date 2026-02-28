@@ -299,17 +299,20 @@ function renderInput(
         </div>
       );
 
-    case "number":
+    case "number": {
+      const handleNumber = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const parsed = parseInt(e.target.value, 10);
+        if (!Number.isNaN(parsed)) setValue(field.key, parsed);
+      };
       return (
         <input
           type="number"
           style={textInput}
           value={values[field.key] as number}
-          onChange={(e) =>
-            setValue(field.key, parseInt(e.target.value, 10) || 0)
-          }
+          onChange={handleNumber}
         />
       );
+    }
 
     case "string[]":
       return (

@@ -113,7 +113,7 @@ export default function CostConfirmation({
 
       <div style={buttonRow}>
         <button
-          style={waiting ? { ...approveBtn, ...approveWaiting } : approveBtn}
+          style={waiting ? approveBtnWaiting : approveBtn}
           onClick={() => respond(true)}
           disabled={waiting}
         >
@@ -246,7 +246,8 @@ const approveBtn: CSSProperties = {
   boxShadow: "0 2px 8px rgba(255, 217, 15, 0.3)",
 };
 
-const approveWaiting: CSSProperties = {
+const approveBtnWaiting: CSSProperties = {
+  ...approveBtn,
   animation: "sigmaPulse 2s ease-in-out infinite",
   opacity: 0.8,
   cursor: "default",

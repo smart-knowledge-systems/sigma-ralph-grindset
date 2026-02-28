@@ -1,4 +1,4 @@
-import { CSSProperties, useCallback } from "react";
+import type { CSSProperties } from "react";
 import { useSSE } from "./hooks/useSSE";
 import PipelinePhases from "./components/PipelinePhases";
 import AuditProgress from "./components/AuditProgress";
@@ -13,12 +13,12 @@ import {
   brandSub as sharedBrandSub,
 } from "./components/styles";
 
+// Stable no-op callback — confirmation state is cleared server-side when
+// the pipeline proceeds, so the client dismiss handler is intentionally empty.
+const noop = () => {};
+
 export default function App() {
   const state = useSSE();
-
-  const dismissConfirm = useCallback(() => {
-    // Confirmation state is cleared server-side when pipeline proceeds
-  }, []);
 
   const auditCount = Object.keys(state.audits).length;
   const showAudit =
@@ -44,10 +44,7 @@ export default function App() {
         </div>
         <div style={connBadge}>
           <span
-            style={{
-              ...connDot,
-              background: state.connected ? "#2A9D8F" : "#D63333",
-            }}
+            style={state.connected ? connDotConnected : connDotDisconnected}
           />
           {state.connected ? "Connected" : "Disconnected"}
         </div>
@@ -68,7 +65,7 @@ export default function App() {
             <CostConfirmation
               estimate={state.costConfirmRequest.estimate}
               requestId={state.costConfirmRequest.requestId}
-              onDismiss={dismissConfirm}
+              onDismiss={noop}
               aggregated={state.costEstimateAggregated ?? undefined}
             />
           )}
@@ -145,11 +142,21 @@ const connBadge: CSSProperties = {
   border: "1px solid #EDE5CC",
 };
 
-const connDot: CSSProperties = {
+const connDotBase: CSSProperties = {
   width: 7,
   height: 7,
   borderRadius: "50%",
   flexShrink: 0,
+};
+
+const connDotConnected: CSSProperties = {
+  ...connDotBase,
+  background: "#2A9D8F",
+};
+
+const connDotDisconnected: CSSProperties = {
+  ...connDotBase,
+  background: "#D63333",
 };
 
 const mainGrid: CSSProperties = {
