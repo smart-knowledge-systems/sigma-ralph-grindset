@@ -7,6 +7,7 @@ import type {
   CostEstimate,
   PerBranchCostEstimate,
 } from "./types";
+import { log } from "./logging";
 
 /** Pricing table: $ per million tokens */
 const PRICING: Record<string, ModelPricing> = {
@@ -49,14 +50,22 @@ export function resolveModelId(model: string): string {
   return MODEL_ALIASES[model] ?? model;
 }
 
-/** Get pricing for a model. Falls back to haiku if unknown. */
+/** Get pricing for a model. Falls back to haiku if unknown (with a warning). */
 export function getModelPricing(model: string): ModelPricing {
   const resolved = resolveModelId(model);
-  return PRICING[resolved] ?? PRICING["claude-haiku-4-5"]!;
+  const pricing = PRICING[resolved];
+  if (!pricing) {
+    log.warn(
+      `Unknown model "${model}" — falling back to claude-haiku-4-5 pricing`,
+    );
+    return PRICING["claude-haiku-4-5"]!;
+  }
+  return pricing;
 }
 
 /** Rough token estimate: ~1 token per 3.5 characters. */
 export function estimateTokens(charCount: number): number {
+  if (charCount <= 0) return 0;
   return Math.ceil(charCount / 3.5);
 }
 
@@ -76,6 +85,23 @@ export function estimateCost(
   perBranchInputTokens: number,
   perBranchOutputTokens: number,
 ): CostEstimate {
+  if (branchCount <= 0) {
+    return {
+      model: resolveModelId(model),
+      branchCount: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      noCacheCost: 0,
+      cachingEnabled: false,
+      cachingSavings: 0,
+      standardApiCost: 0,
+      batchApiCost: 0,
+      batchNoCacheCost: 0,
+      batchWithCacheCost: 0,
+      batchCachingEnabled: false,
+    };
+  }
+
   const pricing = getModelPricing(model);
   const n = branchCount;
 

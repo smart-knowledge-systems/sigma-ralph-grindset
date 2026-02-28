@@ -109,20 +109,20 @@ function createInitialState(): AccumulatedState {
 
 function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
   switch (event.type) {
-    case "pipeline:start":
+    case "infra.pipeline.start":
       state.phase = event.phase;
       state.totalPolicies = event.totalPolicies;
       break;
-    case "pipeline:phase":
+    case "infra.pipeline.phase":
       state.phaseStatuses[event.phase] = event.status;
       if (event.status === "started") state.phase = event.phase;
       break;
-    case "pipeline:complete":
+    case "infra.pipeline.complete":
       state.pipelineComplete = true;
       state.pipelineSuccess = event.success;
       state.phase = "done";
       break;
-    case "audit:start":
+    case "audit.start":
       state.audits[event.policy] = {
         policy: event.policy,
         branchCount: event.branchCount,
@@ -132,7 +132,7 @@ function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
         branches: {},
       };
       break;
-    case "audit:branch:start": {
+    case "audit.branch.start": {
       const audit = state.audits[event.policy];
       if (audit) {
         audit.branches[event.branch] = {
@@ -143,7 +143,7 @@ function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
       }
       break;
     }
-    case "audit:branch:complete": {
+    case "audit.branch.complete": {
       const audit = state.audits[event.policy];
       if (audit) {
         const branch = audit.branches[event.branch];
@@ -156,7 +156,7 @@ function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
       }
       break;
     }
-    case "audit:branch:fail": {
+    case "audit.branch.fail": {
       const audit = state.audits[event.policy];
       if (audit) {
         const branch = audit.branches[event.branch];
@@ -169,7 +169,7 @@ function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
       }
       break;
     }
-    case "audit:complete": {
+    case "audit.complete": {
       const audit = state.audits[event.policy];
       if (audit) {
         audit.processed = event.processed;
@@ -178,11 +178,11 @@ function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
       }
       break;
     }
-    case "fix:start":
+    case "fix.start":
       state.fix.totalBatches = event.totalBatches;
       state.fix.totalIssues = event.totalIssues;
       break;
-    case "fix:batch:start":
+    case "fix.batch.start":
       state.fix.batches[event.batchNum] = {
         status: "running",
         fileCount: event.fileCount,
@@ -191,7 +191,7 @@ function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
         maxAttempts: 3,
       };
       break;
-    case "fix:batch:attempt": {
+    case "fix.batch.attempt": {
       const batch = state.fix.batches[event.batchNum];
       if (batch) {
         batch.attempt = event.attempt;
@@ -199,29 +199,29 @@ function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
       }
       break;
     }
-    case "fix:batch:check": {
+    case "fix.batch.check": {
       const batch = state.fix.batches[event.batchNum];
       if (batch) batch.checkPassed = event.passed;
       break;
     }
-    case "fix:batch:complete": {
+    case "fix.batch.complete": {
       const batch = state.fix.batches[event.batchNum];
       if (batch) batch.status = event.success ? "done" : "failed";
       if (event.success) state.fix.fixed++;
       else state.fix.failed++;
       break;
     }
-    case "fix:complete":
+    case "fix.complete":
       state.fix.fixed = event.fixed;
       state.fix.failed = event.failed;
       break;
-    case "cost:estimate":
+    case "infra.cost.estimate":
       state.costEstimate = event.estimate;
       break;
-    case "cost:estimate:aggregated":
+    case "infra.cost.estimate.aggregated":
       state.costEstimateAggregated = event.estimate;
       break;
-    case "cost:confirm-request":
+    case "infra.cost.confirm.request":
       state.costConfirmRequest = {
         estimate: {
           model: event.estimate.model,
@@ -233,7 +233,7 @@ function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
         requestId: event.requestId,
       };
       break;
-    case "cost:confirm-response":
+    case "infra.cost.confirm.response":
       state.costConfirmRequest = null;
       break;
     case "log":
@@ -326,7 +326,7 @@ export function startServer(): { port: number; stop: () => Promise<void> } {
             );
           }
           events.emit({
-            type: "cost:confirm-response",
+            type: "infra.cost.confirm.response",
             approved: body.approved,
             requestId: body.requestId,
           });

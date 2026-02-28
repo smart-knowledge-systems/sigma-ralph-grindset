@@ -12,14 +12,15 @@ import { getFixFilesWithLoc, batchFilesByLoc } from "./batching";
 import { buildFixSystemPrompt, buildFixPrompt } from "./prompts";
 import { fixBatch } from "./executor";
 
-interface RunFixesOptions {
+export interface RunFixesOptions {
   interactive?: boolean;
   skipCommits?: boolean;
   policyFilter?: string;
 }
 
-/** Set up the fix branch in git. */
+/** Set up the fix branch in git. Throws on failure instead of process.exit. */
 function setupGit(config: AuditConfig): void {
+  // Run independent git queries in parallel (all are sync, but we batch them)
   const shortHash = Bun.spawnSync(["git", "rev-parse", "--short", "HEAD"], {
     cwd: config.projectRoot,
   })
@@ -28,28 +29,28 @@ function setupGit(config: AuditConfig): void {
 
   const fixBranch = `fix/audit-improvements-${shortHash}`;
 
-  const currentBranch = Bun.spawnSync(["git", "branch", "--show-current"], {
-    cwd: config.projectRoot,
-  })
-    .stdout.toString()
-    .trim();
+  // These three git checks are independent — run them together
+  const [currentBranchResult, diffResult, cachedResult] = [
+    Bun.spawnSync(["git", "branch", "--show-current"], {
+      cwd: config.projectRoot,
+    }),
+    Bun.spawnSync(["git", "diff", "--quiet"], { cwd: config.projectRoot }),
+    Bun.spawnSync(["git", "diff", "--cached", "--quiet"], {
+      cwd: config.projectRoot,
+    }),
+  ];
+
+  const currentBranch = currentBranchResult.stdout.toString().trim();
 
   if (currentBranch === fixBranch) {
     log.info(`Already on ${fixBranch}`);
     return;
   }
 
-  // Check for clean working tree
-  const diffResult = Bun.spawnSync(["git", "diff", "--quiet"], {
-    cwd: config.projectRoot,
-  });
-  const cachedResult = Bun.spawnSync(["git", "diff", "--cached", "--quiet"], {
-    cwd: config.projectRoot,
-  });
-
   if (diffResult.exitCode !== 0 || cachedResult.exitCode !== 0) {
-    log.error("Working tree is not clean. Commit or stash changes first.");
-    process.exit(1);
+    throw new Error(
+      "Working tree is not clean. Commit or stash changes first.",
+    );
   }
 
   // Delete stale fix branch if it exists
@@ -73,6 +74,14 @@ function getPoliciesForIssues(
   config: AuditConfig,
   issueIds: number[],
 ): string[] {
+  if (issueIds.length === 0) return [];
+
+  // Validate all IDs are numbers to prevent SQL issues
+  if (!issueIds.every((id) => typeof id === "number" && Number.isFinite(id))) {
+    log.warn("getPoliciesForIssues received non-numeric issue IDs — skipping");
+    return [];
+  }
+
   const d = getDb(config);
   const placeholders = issueIds.map(() => "?").join(",");
   const rows = d
@@ -113,6 +122,7 @@ function dirSummary(files: string[]): string {
 
 /**
  * Run the fix pipeline: load pending issues, batch by LOC, fix each batch.
+ * Throws on fatal errors instead of calling process.exit.
  */
 export async function runFixes(
   config: AuditConfig,
@@ -123,8 +133,7 @@ export async function runFixes(
 
   // Preflight checks
   if (!existsSync(config.dbPath)) {
-    log.error("audit.db not found. Run audit first.");
-    process.exit(1);
+    throw new Error("audit.db not found. Run audit first.");
   }
 
   // Ensure schema is initialized
@@ -134,8 +143,7 @@ export async function runFixes(
   if (opts.policyFilter) {
     const policyPath = `${config.policiesDir}/${opts.policyFilter}/POLICY.md`;
     if (!existsSync(policyPath)) {
-      log.error(`Policy not found: ${opts.policyFilter}`);
-      process.exit(1);
+      throw new Error(`Policy not found: ${opts.policyFilter}`);
     }
     log.info(`Filtering fixes to policy: ${opts.policyFilter}`);
   }
@@ -161,7 +169,7 @@ export async function runFixes(
   const totalPending = countPendingIssues(config, opts.policyFilter);
 
   events.emit({
-    type: "fix:start",
+    type: "fix.start",
     totalBatches,
     totalIssues: totalPending,
   });
@@ -199,27 +207,25 @@ export async function runFixes(
     }
 
     // Build prompts
-    const systemPrompt = buildFixSystemPrompt(
+    const systemPrompt = await buildFixSystemPrompt(
       config,
       policies.length > 0 ? policies : ["default"],
     );
     const prompt = buildFixPrompt(batch.files, issues);
 
-    const success = await fixBatch(
+    const success = await fixBatch({
       batchLabel,
       prompt,
       systemPrompt,
       issueIds,
-      batch.files.length,
-      issues.length,
+      fileCount: batch.files.length,
+      issueCount: issues.length,
       config,
-      {
-        interactive: opts.interactive,
-        skipCommits: opts.skipCommits,
-        batchNum: batch.batchNum,
-        totalBatches,
-      },
-    );
+      interactive: opts.interactive,
+      skipCommits: opts.skipCommits,
+      batchNum: batch.batchNum,
+      totalBatches,
+    });
 
     if (success) {
       fixed++;
@@ -230,7 +236,7 @@ export async function runFixes(
     log.info("");
   }
 
-  events.emit({ type: "fix:complete", fixed, failed });
+  events.emit({ type: "fix.complete", fixed, failed });
 
   // Summary
   log.info("=== FIX SUMMARY ===");

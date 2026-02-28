@@ -25,60 +25,64 @@ export function sanitizeErrorForEvent(error: string): string {
 }
 
 export type PipelineEvent =
-  | { type: "pipeline:start"; phase: string; totalPolicies: number }
-  | { type: "pipeline:phase"; phase: string; status: "started" | "completed" }
-  | { type: "pipeline:complete"; success: boolean }
+  | { type: "infra.pipeline.start"; phase: string; totalPolicies: number }
   | {
-      type: "audit:start";
+      type: "infra.pipeline.phase";
+      phase: string;
+      status: "started" | "completed";
+    }
+  | { type: "infra.pipeline.complete"; success: boolean }
+  | {
+      type: "audit.start";
       policy: string;
       branchCount: number;
       policyIndex: number;
       totalPolicies: number;
     }
   | {
-      type: "audit:branch:start";
+      type: "audit.branch.start";
       branch: string;
       fileCount: number;
       policy: string;
     }
   | {
-      type: "audit:branch:complete";
+      type: "audit.branch.complete";
       branch: string;
       issueCount: number;
       policy: string;
     }
   | {
-      type: "audit:branch:fail";
+      type: "audit.branch.fail";
       branch: string;
       error: string;
       policy: string;
     }
   | {
-      type: "audit:complete";
+      type: "audit.complete";
       policy: string;
       processed: number;
       succeeded: number;
       failed: number;
     }
-  | { type: "fix:start"; totalBatches: number; totalIssues: number }
+  | { type: "fix.start"; totalBatches: number; totalIssues: number }
   | {
-      type: "fix:batch:start";
+      type: "fix.batch.start";
       batchNum: number;
       totalBatches: number;
       fileCount: number;
       issueCount: number;
     }
   | {
-      type: "fix:batch:attempt";
+      type: "fix.batch.attempt";
       batchNum: number;
       attempt: number;
       maxAttempts: number;
     }
-  | { type: "fix:batch:check"; batchNum: number; passed: boolean }
-  | { type: "fix:batch:complete"; batchNum: number; success: boolean }
-  | { type: "fix:complete"; fixed: number; failed: number }
+  | { type: "fix.batch.check"; batchNum: number; passed: boolean }
+  | { type: "fix.batch.complete"; batchNum: number; success: boolean }
+  | { type: "fix.complete"; fixed: number; failed: number }
   | {
-      type: "cost:estimate";
+      type: "infra.cost.estimate";
       estimate: {
         model: string;
         branchCount: number;
@@ -88,20 +92,26 @@ export type PipelineEvent =
       };
     }
   | {
-      type: "cost:estimate:aggregated";
+      type: "infra.cost.estimate.aggregated";
       estimate: PerBranchCostEstimate;
     }
   | {
-      type: "cost:confirm-request";
+      type: "infra.cost.confirm.request";
       estimate: CostEstimate;
       requestId: string;
     }
   | {
-      type: "cost:confirm-response";
+      type: "infra.cost.confirm.response";
       approved: boolean;
       requestId: string;
     }
-  | { type: "log"; level: string; message: string; timestamp: string };
+  | {
+      type: "log";
+      level: string;
+      message: string;
+      timestamp: string;
+      runId: string;
+    };
 
 type Handler = (event: PipelineEvent) => void;
 type TypedHandler<T extends PipelineEvent["type"]> = (

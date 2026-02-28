@@ -13,28 +13,41 @@ import {
 
 const MAX_RETRIES = 3;
 
+/** Options for a single fix batch run. */
+export interface FixBatchOptions {
+  batchLabel: string;
+  prompt: string;
+  systemPrompt: string;
+  issueIds: number[];
+  fileCount: number;
+  issueCount: number;
+  config: AuditConfig;
+  interactive?: boolean;
+  skipCommits?: boolean;
+  batchNum?: number;
+  totalBatches?: number;
+}
+
 /**
  * Fix a batch of issues by spawning Claude CLI in agentic mode.
  */
-export async function fixBatch(
-  batchLabel: string,
-  prompt: string,
-  systemPrompt: string,
-  issueIds: number[],
-  fileCount: number,
-  issueCount: number,
-  config: AuditConfig,
-  opts: {
-    interactive?: boolean;
-    skipCommits?: boolean;
-    batchNum?: number;
-    totalBatches?: number;
-  },
-): Promise<boolean> {
-  const batchNum = opts.batchNum ?? 0;
-  const totalBatches = opts.totalBatches ?? 0;
+export async function fixBatch(opts: FixBatchOptions): Promise<boolean> {
+  const {
+    batchLabel,
+    prompt,
+    systemPrompt,
+    issueIds,
+    fileCount,
+    issueCount,
+    config,
+    interactive = false,
+    skipCommits = false,
+    batchNum = 0,
+    totalBatches = 0,
+  } = opts;
+
   events.emit({
-    type: "fix:batch:start",
+    type: "fix.batch.start",
     batchNum,
     totalBatches,
     fileCount,
@@ -43,7 +56,7 @@ export async function fixBatch(
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     events.emit({
-      type: "fix:batch:attempt",
+      type: "fix.batch.attempt",
       batchNum,
       attempt,
       maxAttempts: MAX_RETRIES,
@@ -64,20 +77,20 @@ export async function fixBatch(
       systemPrompt,
     ];
 
-    if (!opts.interactive) {
+    if (!interactive) {
       claudeArgs.push("--print", "--no-session-persistence");
     }
 
     const proc = Bun.spawn(claudeArgs, {
       stdin: new Response(prompt + "\n"),
-      stdout: opts.interactive ? "inherit" : "pipe",
-      stderr: opts.interactive ? "inherit" : "pipe",
+      stdout: interactive ? "inherit" : "pipe",
+      stderr: interactive ? "inherit" : "pipe",
       cwd: config.projectRoot,
     });
 
     let claudeOutput = "";
     let stderrText = "";
-    if (!opts.interactive) {
+    if (!interactive) {
       // Consume both streams to prevent buffer backpressure
       const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
@@ -98,8 +111,13 @@ export async function fixBatch(
         errorMessage: stderrText.slice(0, 4000),
       });
       updateIssueFixStatus(config, issueIds, "pending");
-      events.emit({ type: "fix:batch:complete", batchNum, success: false });
-      return false;
+
+      // Don't proceed to bun check — the fix attempt failed
+      if (attempt === MAX_RETRIES) {
+        events.emit({ type: "fix.batch.complete", batchNum, success: false });
+        return false;
+      }
+      continue;
     }
 
     // Store truncated output
@@ -113,30 +131,26 @@ export async function fixBatch(
       stdout: "pipe",
       stderr: "pipe",
     });
-    const [checkOutput] = await Promise.all([
+    const [checkOutput, checkStderr] = await Promise.all([
       new Response(checkProc.stdout).text(),
       new Response(checkProc.stderr).text(),
     ]);
     const checkExit = await checkProc.exited;
 
     if (checkExit === 0) {
-      events.emit({ type: "fix:batch:check", batchNum, passed: true });
+      events.emit({ type: "fix.batch.check", batchNum, passed: true });
       log.info("  bun check passed");
 
       // Format
       const fmtProc = Bun.spawn(["bun", "format"], {
         cwd: config.projectRoot,
-        stdout: "pipe",
-        stderr: "pipe",
+        stdout: "ignore",
+        stderr: "ignore",
       });
-      await Promise.all([
-        new Response(fmtProc.stdout).text(),
-        new Response(fmtProc.stderr).text(),
-      ]);
       await fmtProc.exited;
 
       // Commit
-      if (!opts.skipCommits) {
+      if (!skipCommits) {
         const commitPrompt = `Commit the staged and unstaged changes. These are fixes for audit issues: ${batchLabel} (${fileCount} files, ${issueCount} issues) based on project coding guidelines. Use /git-commit-manager`;
         const commitProc = Bun.spawn(
           [
@@ -150,41 +164,40 @@ export async function fixBatch(
           ],
           {
             stdin: new Response(commitPrompt),
-            stdout: "pipe",
-            stderr: "pipe",
+            stdout: "ignore",
+            stderr: "ignore",
             cwd: config.projectRoot,
           },
         );
-        await Promise.all([
-          new Response(commitProc.stdout).text(),
-          new Response(commitProc.stderr).text(),
-        ]);
         await commitProc.exited;
       }
 
       updateIssueFixStatus(config, issueIds, "fixed");
       updateFixAttempt(config, attemptId, "success");
-      events.emit({ type: "fix:batch:complete", batchNum, success: true });
+      events.emit({ type: "fix.batch.complete", batchNum, success: true });
       return true;
     }
 
     // Check failed
-    events.emit({ type: "fix:batch:check", batchNum, passed: false });
+    events.emit({ type: "fix.batch.check", batchNum, passed: false });
     log.warn(`bun check failed (attempt ${attempt}/${MAX_RETRIES})`);
+    if (checkStderr.trim()) {
+      log.debug(`  check stderr: ${checkStderr.trim().slice(0, 500)}`);
+    }
     updateFixAttempt(config, attemptId, "check_failed", {
       checkOutput: checkOutput.slice(0, 4000),
     });
 
     if (attempt === MAX_RETRIES) {
       log.error(`All retries exhausted for ${batchLabel}`);
-      if (!opts.skipCommits) {
+      if (!skipCommits) {
         // Revert changes
         Bun.spawnSync(["git", "checkout", "--", "."], {
           cwd: config.projectRoot,
         });
       }
       updateIssueFixStatus(config, issueIds, "failed");
-      events.emit({ type: "fix:batch:complete", batchNum, success: false });
+      events.emit({ type: "fix.batch.complete", batchNum, success: false });
       return false;
     }
   }

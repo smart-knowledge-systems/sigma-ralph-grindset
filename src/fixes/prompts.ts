@@ -2,16 +2,15 @@
 // Fix prompt builder
 // ============================================================================
 
-import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import type { AuditConfig } from "../types";
 import { log } from "../logging";
 
 /** Build the system prompt for fix mode (scoped to relevant policies). */
-export function buildFixSystemPrompt(
+export async function buildFixSystemPrompt(
   config: AuditConfig,
   policyNames: string[],
-): string {
+): Promise<string> {
   let prompt = `You are refactoring React/Next.js components for readability and maintainability.
 These components were built ad hoc, and need to be organized so a new team member
 can quickly get up to speed.
@@ -23,19 +22,25 @@ RULES:
 - After making changes, use /check-and-fix to verify lint and type checks pass
 `;
 
-  for (const policyName of policyNames) {
+  const reads = policyNames.map(async (policyName) => {
     const policyFile = resolve(config.policiesDir, policyName, "POLICY.md");
-    if (!existsSync(policyFile)) continue;
+    const file = Bun.file(policyFile);
+    if (!(await file.exists())) return null;
     try {
-      const content = readFileSync(policyFile, "utf-8");
-      if (content.trim()) {
-        prompt += `\n--- ${policyName} ---\n\n${content}\n`;
-      }
+      const content = await file.text();
+      if (!content.trim()) return null;
+      return `\n--- ${policyName} ---\n\n${content}\n`;
     } catch (e) {
       log.warn(
         `Policy file not readable: ${policyName} — ${e instanceof Error ? e.message : "unknown error"}`,
       );
+      return null;
     }
+  });
+
+  const sections = await Promise.all(reads);
+  for (const section of sections) {
+    if (section) prompt += section;
   }
 
   return prompt;
@@ -71,10 +76,10 @@ export function buildFixPrompt(
 
     let fileList = "";
     for (let j = 0; j < paths.length; j++) {
-      const lr = lineRanges[j] ?? "";
-      fileList += lr
-        ? `- \`${paths[j]}\` (lines ${lr})\n`
-        : `- \`${paths[j]}\`\n`;
+      const path = paths[j];
+      if (!path) continue;
+      const lr = j < lineRanges.length ? (lineRanges[j] ?? "") : "";
+      fileList += lr ? `- \`${path}\` (lines ${lr})\n` : `- \`${path}\`\n`;
     }
 
     prompt += `### Issue ${i + 1} (${issue.severity}) — rule: ${issue.rule}\n`;

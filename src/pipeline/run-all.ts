@@ -34,8 +34,7 @@ export async function runPipeline(
 ): Promise<void> {
   // Validate mutual exclusivity
   if (opts.diffMode && opts.forceAll) {
-    log.error("--diff and --all are mutually exclusive");
-    process.exit(2);
+    throw new Error("--diff and --all are mutually exclusive");
   }
 
   // Initialize logging
@@ -44,7 +43,7 @@ export async function runPipeline(
 
   try {
     events.emit({
-      type: "pipeline:start",
+      type: "infra.pipeline.start",
       phase: "pipeline",
       totalPolicies: 0,
     });
@@ -59,15 +58,14 @@ export async function runPipeline(
     // Discover policies
     const policies = discoverPolicies(config);
     if (policies.length === 0) {
-      log.error(
+      throw new Error(
         "No policies found. Create policies in policies/<name>/POLICY.md",
       );
-      process.exit(1);
     }
 
     // Update totalPolicies now that we know
     events.emit({
-      type: "pipeline:start",
+      type: "infra.pipeline.start",
       phase: "pipeline",
       totalPolicies: policies.length,
     });
@@ -75,14 +73,14 @@ export async function runPipeline(
     // Step 1: Generate branches (skip in diff mode)
     if (!opts.diffMode) {
       events.emit({
-        type: "pipeline:phase",
+        type: "infra.pipeline.phase",
         phase: "branches",
         status: "started",
       });
       log.info("--- Step 1: Generate branches ---");
       generateBranches(config);
       events.emit({
-        type: "pipeline:phase",
+        type: "infra.pipeline.phase",
         phase: "branches",
         status: "completed",
       });
@@ -96,7 +94,11 @@ export async function runPipeline(
         .trim() || null;
 
     // Step 2: Run audit
-    events.emit({ type: "pipeline:phase", phase: "audit", status: "started" });
+    events.emit({
+      type: "infra.pipeline.phase",
+      phase: "audit",
+      status: "started",
+    });
     if (opts.mode === "cli" || policies.length === 1) {
       // CLI mode or single policy: sequential per-policy
       for (let i = 0; i < policies.length; i++) {
@@ -123,14 +125,14 @@ export async function runPipeline(
       const estimate = computePerBranchCostEstimate(config, policies);
       log.info(formatPerBranchEstimate(estimate));
       events.emit({
-        type: "cost:estimate:aggregated",
+        type: "infra.cost.estimate.aggregated",
         estimate,
       });
 
       // Single confirmation for all policies
       const requestId = randomUUID();
       events.emit({
-        type: "cost:confirm-request",
+        type: "infra.cost.confirm.request",
         estimate: {
           model: estimate.model,
           branchCount: estimate.branchCount,
@@ -153,7 +155,7 @@ export async function runPipeline(
       if (!approved) {
         log.info("Audit cancelled by user.");
         events.emit({
-          type: "pipeline:complete",
+          type: "infra.pipeline.complete",
           success: false,
         });
         return;
@@ -172,16 +174,24 @@ export async function runPipeline(
     }
 
     events.emit({
-      type: "pipeline:phase",
+      type: "infra.pipeline.phase",
       phase: "audit",
       status: "completed",
     });
 
     // Step 3: Run fixes
-    events.emit({ type: "pipeline:phase", phase: "fix", status: "started" });
+    events.emit({
+      type: "infra.pipeline.phase",
+      phase: "fix",
+      status: "started",
+    });
     log.info("--- Step 3: Run fixes ---");
     await runFixes(config);
-    events.emit({ type: "pipeline:phase", phase: "fix", status: "completed" });
+    events.emit({
+      type: "infra.pipeline.phase",
+      phase: "fix",
+      status: "completed",
+    });
     log.info("");
 
     // Step 4: Record checkpoints (skip in diff mode)
@@ -206,11 +216,11 @@ export async function runPipeline(
     }
 
     pipelineSuccess = true;
-    events.emit({ type: "pipeline:complete", success: true });
+    events.emit({ type: "infra.pipeline.complete", success: true });
     log.info("=== Pipeline complete ===");
   } finally {
     if (!pipelineSuccess) {
-      events.emit({ type: "pipeline:complete", success: false });
+      events.emit({ type: "infra.pipeline.complete", success: false });
     }
     const failedDir = cleanupLogs(pipelineSuccess, config.auditDir);
     if (failedDir) {

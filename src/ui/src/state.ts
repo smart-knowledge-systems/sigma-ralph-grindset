@@ -31,21 +31,21 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
     case "connected":
       return { ...state, connected: true };
 
-    case "pipeline:start":
+    case "infra.pipeline.start":
       return {
         ...state,
         phase: event.phase,
         totalPolicies: event.totalPolicies,
       };
 
-    case "pipeline:phase":
+    case "infra.pipeline.phase":
       return {
         ...state,
         phaseStatuses: { ...state.phaseStatuses, [event.phase]: event.status },
         phase: event.status === "started" ? event.phase : state.phase,
       };
 
-    case "pipeline:complete":
+    case "infra.pipeline.complete":
       return {
         ...state,
         pipelineComplete: true,
@@ -53,7 +53,7 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
         phase: "done",
       };
 
-    case "audit:start":
+    case "audit.start":
       return {
         ...state,
         audits: {
@@ -69,7 +69,7 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
         },
       };
 
-    case "audit:branch:start": {
+    case "audit.branch.start": {
       const audit = state.audits[event.policy];
       if (!audit) return state;
       return {
@@ -91,7 +91,7 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
       };
     }
 
-    case "audit:branch:complete": {
+    case "audit.branch.complete": {
       const audit = state.audits[event.policy];
       if (!audit) return state;
       const branch = audit.branches[event.branch];
@@ -116,7 +116,7 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
       };
     }
 
-    case "audit:branch:fail": {
+    case "audit.branch.fail": {
       const audit = state.audits[event.policy];
       if (!audit) return state;
       const branch = audit.branches[event.branch];
@@ -141,7 +141,7 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
       };
     }
 
-    case "audit:complete": {
+    case "audit.complete": {
       const audit = state.audits[event.policy];
       if (!audit) return state;
       return {
@@ -158,7 +158,7 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
       };
     }
 
-    case "fix:start":
+    case "fix.start":
       return {
         ...state,
         fix: {
@@ -168,7 +168,7 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
         },
       };
 
-    case "fix:batch:start":
+    case "fix.batch.start":
       return {
         ...state,
         fix: {
@@ -186,7 +186,7 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
         },
       };
 
-    case "fix:batch:attempt": {
+    case "fix.batch.attempt": {
       const batch = state.fix.batches[event.batchNum];
       if (!batch) return state;
       return {
@@ -205,7 +205,7 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
       };
     }
 
-    case "fix:batch:check": {
+    case "fix.batch.check": {
       const batch = state.fix.batches[event.batchNum];
       if (!batch) return state;
       return {
@@ -220,7 +220,7 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
       };
     }
 
-    case "fix:batch:complete": {
+    case "fix.batch.complete": {
       const batch = state.fix.batches[event.batchNum];
       return {
         ...state,
@@ -244,19 +244,19 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
       };
     }
 
-    case "fix:complete":
+    case "fix.complete":
       return {
         ...state,
         fix: { ...state.fix, fixed: event.fixed, failed: event.failed },
       };
 
-    case "cost:estimate":
+    case "infra.cost.estimate":
       return { ...state, costEstimate: event.estimate };
 
-    case "cost:estimate:aggregated":
+    case "infra.cost.estimate.aggregated":
       return { ...state, costEstimateAggregated: event.estimate };
 
-    case "cost:confirm-request":
+    case "infra.cost.confirm.request":
       return {
         ...state,
         costConfirmRequest: {

@@ -6,6 +6,12 @@ import type { AuditMode, CliOptions } from "./types";
 import { loadConfig } from "./config";
 import { log, setLogLevel, initFileLogging, cleanupLogs } from "./logging";
 
+const VALID_COMMANDS = ["audit", "fix", "all", "branches", "config"] as const;
+
+function isValidCommand(cmd: string): cmd is CliOptions["command"] {
+  return (VALID_COMMANDS as readonly string[]).includes(cmd);
+}
+
 function printUsage(): void {
   log.info(`Usage: sigma <command> [options]
 
@@ -44,12 +50,13 @@ function parseArgs(argv: string[]): CliOptions {
     process.exit(0);
   }
 
-  const command = args[0] as CliOptions["command"];
-  if (!["audit", "fix", "all", "branches", "config"].includes(command)) {
-    log.error(`Unknown command: ${command}`);
+  const commandArg = args[0]!;
+  if (!isValidCommand(commandArg)) {
+    log.error(`Unknown command: ${commandArg}`);
     printUsage();
     process.exit(1);
   }
+  const command = commandArg;
 
   const opts: CliOptions = {
     command,
@@ -92,12 +99,20 @@ function parseArgs(argv: string[]): CliOptions {
         opts.forceAll = true;
         break;
       case "--model":
+        if (i + 1 >= args.length) {
+          log.error("--model requires a value");
+          process.exit(1);
+        }
         opts.model = args[++i];
         break;
       case "--dry-run":
         opts.dryRun = true;
         break;
       case "--max-loc": {
+        if (i + 1 >= args.length) {
+          log.error("--max-loc requires a value");
+          process.exit(1);
+        }
         const n = parseInt(args[++i]!, 10);
         if (isNaN(n)) {
           log.error("--max-loc requires a numeric value");
@@ -171,12 +186,12 @@ async function main(): Promise<void> {
   if (!has("--dangerously-skip-commits") && config.defaultSkipCommits)
     opts.skipCommits = true;
 
-  // Override model if specified
+  // Override model if specified — AuditConfig fields are mutable
   if (opts.model) {
-    (config as { auditModel: string }).auditModel = opts.model;
+    config.auditModel = opts.model;
   }
   if (opts.maxLoc) {
-    (config as { maxLoc: number }).maxLoc = opts.maxLoc;
+    config.maxLoc = opts.maxLoc;
   }
 
   // Determine mode: explicit --cli flag > config default > "batch"
@@ -266,7 +281,7 @@ async function main(): Promise<void> {
 
           log.info(formatPerBranchEstimate(estimate));
           events.emit({
-            type: "cost:estimate:aggregated",
+            type: "infra.cost.estimate.aggregated",
             estimate,
           });
 
@@ -278,7 +293,7 @@ async function main(): Promise<void> {
           // Single confirmation for all policies
           const requestId = randomUUID();
           events.emit({
-            type: "cost:confirm-request",
+            type: "infra.cost.confirm.request",
             estimate: {
               model: estimate.model,
               branchCount: estimate.branchCount,

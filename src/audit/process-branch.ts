@@ -51,7 +51,7 @@ export async function processBranch(
   }
 
   events.emit({
-    type: "audit:branch:start",
+    type: "audit.branch.start",
     branch: branchLabel,
     fileCount: files.length,
     policy: policyLabel,
@@ -119,7 +119,7 @@ export async function processBranch(
 
     updateScanStatus(config, scanId, "completed", { issueCount });
     events.emit({
-      type: "audit:branch:complete",
+      type: "audit.branch.complete",
       branch: branchLabel,
       issueCount,
       policy: policyLabel,
@@ -148,7 +148,7 @@ export async function processBranch(
       errorMessage: errorMsg.slice(0, 4000),
     });
     events.emit({
-      type: "audit:branch:fail",
+      type: "audit.branch.fail",
       branch: branchLabel,
       error: err.message,
       policy: policyLabel,

@@ -233,7 +233,7 @@ export async function waitForConfirmation(requestId: string): Promise<boolean> {
     };
 
     // Browser path: listen for event bus
-    const unsub = events.on("cost:confirm-response", (e) => {
+    const unsub = events.on("infra.cost.confirm.response", (e) => {
       if (e.requestId === requestId) {
         cleanup();
         unsub();
@@ -352,7 +352,7 @@ async function processBatchEvents(
 async function requestCostApproval(estimate: CostEstimate): Promise<boolean> {
   const requestId = randomUUID();
   events.emit({
-    type: "cost:confirm-request",
+    type: "infra.cost.confirm.request",
     estimate,
     requestId,
   });
@@ -479,7 +479,7 @@ async function runPerBranchBatch(
 
   log.info(formatPerBranchEstimate(perBranchEstimate));
   events.emit({
-    type: "cost:estimate",
+    type: "infra.cost.estimate",
     estimate: {
       model: perBranchEstimate.model,
       branchCount: perBranchEstimate.branchCount,
@@ -562,7 +562,7 @@ async function runCombinedBatch(
 
   log.info(formatEstimate(estimate));
   events.emit({
-    type: "cost:estimate",
+    type: "infra.cost.estimate",
     estimate: {
       model: estimate.model,
       branchCount: estimate.branchCount,
@@ -779,7 +779,7 @@ export async function runAudit(
   log.info("");
 
   events.emit({
-    type: "audit:start",
+    type: "audit.start",
     policy: policyLabel,
     branchCount: 0, // updated below once known
     policyIndex: 0,
@@ -806,7 +806,7 @@ export async function runAudit(
   );
 
   events.emit({
-    type: "audit:complete",
+    type: "audit.complete",
     policy: policyLabel,
     processed: counters.processed,
     succeeded: counters.succeeded,

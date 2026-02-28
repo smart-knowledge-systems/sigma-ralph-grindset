@@ -4,6 +4,7 @@
 
 import { mkdirSync, appendFileSync, existsSync, rmSync, renameSync } from "fs";
 import { resolve } from "path";
+import { randomUUID } from "crypto";
 import { events } from "./events";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
@@ -29,8 +30,19 @@ let logTmpDir: string | null = null;
 let consoleLevel: number = LEVEL_NUM.info;
 let errorCount = 0;
 
+/**
+ * Unique ID for the current pipeline run. Generated once at startup
+ * so all log lines from a single invocation can be correlated.
+ */
+const runId: string = randomUUID();
+
 function timestamp(): string {
   return new Date().toISOString();
+}
+
+/** Get the current run ID for correlation. */
+export function getRunId(): string {
+  return runId;
 }
 
 /** Initialize file logging. Creates ./logs/.tmp/ and opens a log file. */
@@ -103,7 +115,10 @@ export function cleanupLogs(success: boolean, baseDir: string): string | null {
 function writeToFile(level: string, msg: string, ts: string): void {
   if (!logFilePath) return;
   try {
-    appendFileSync(logFilePath, `[${ts}] ${level} ${msg}\n`);
+    appendFileSync(
+      logFilePath,
+      `[${ts}] [${runId.slice(0, 8)}] ${level} ${msg}\n`,
+    );
   } catch {
     // ignore file write errors
   }
@@ -132,8 +147,8 @@ function sanitize(msg: string): string {
 }
 
 // NOTE: This is a CLI tool — readerId/sessionId correlation IDs from the
-// logging policy do not apply. Consider adding a runId (generated at startup)
-// to tie all log lines from a single pipeline run together if needed.
+// logging policy do not apply. A runId is generated at startup to tie all
+// log lines from a single pipeline run together.
 function write(level: LogLevel, msg: string): void {
   const sanitized = sanitize(msg);
 
@@ -145,8 +160,8 @@ function write(level: LogLevel, msg: string): void {
   // Always write to file at debug level
   writeToFile(`[${level.toUpperCase()}]`, sanitized, ts);
 
-  // Emit to event bus
-  events.emit({ type: "log", level, message: sanitized, timestamp: ts });
+  // Emit to event bus (includes runId for cross-event correlation)
+  events.emit({ type: "log", level, message: sanitized, timestamp: ts, runId });
 
   // Console output respects LOG_LEVEL
   if (LEVEL_NUM[level] < consoleLevel) return;
