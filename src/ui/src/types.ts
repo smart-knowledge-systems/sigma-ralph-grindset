@@ -155,3 +155,58 @@ export interface UIState {
   logs: LogEntry[];
   startTime: string;
 }
+
+// Shape of the /api/state snapshot used for batch hydration.
+// Fields are optional to defend against malformed API responses.
+export interface HydrationSnapshot {
+  phase?: string;
+  totalPolicies?: number;
+  phaseStatuses?: Record<string, string>;
+  pipelineComplete?: boolean;
+  pipelineSuccess?: boolean;
+  audits?: Record<
+    string,
+    {
+      policy: string;
+      branchCount: number;
+      processed: number;
+      succeeded: number;
+      failed: number;
+      branches?: Record<
+        string,
+        {
+          status: string;
+          fileCount: number;
+          issueCount: number;
+          error?: string;
+        }
+      >;
+    }
+  >;
+  fix?: {
+    totalBatches: number;
+    totalIssues: number;
+    batches?: Record<
+      string,
+      {
+        status: string;
+        fileCount: number;
+        issueCount: number;
+        attempt: number;
+        maxAttempts: number;
+      }
+    >;
+  };
+  costEstimate?: CostEstimate | null;
+  costEstimateAggregated?: AggregatedCostEstimate | null;
+  costConfirmRequest?: {
+    estimate: CostEstimate;
+    requestId: string;
+  } | null;
+  logs?: LogEntry[];
+}
+
+// All actions the reducer accepts: wire events + internal hydration action
+export type ReducerAction =
+  | PipelineEvent
+  | { type: "hydrate:snapshot"; snapshot: HydrationSnapshot };

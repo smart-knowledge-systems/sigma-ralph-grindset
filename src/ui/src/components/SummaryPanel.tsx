@@ -36,6 +36,7 @@ export default function SummaryPanel({
 
   useEffect(() => {
     const start = new Date(startTime).getTime();
+    if (Number.isNaN(start)) return; // guard against malformed startTime
     const tick = () => {
       setElapsed(Math.floor((Date.now() - start) / 1000));
     };

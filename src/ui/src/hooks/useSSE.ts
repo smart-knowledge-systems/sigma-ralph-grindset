@@ -1,203 +1,100 @@
-// SSE hook: connects to /api/events, hydrates from /api/state, dispatches events
+// SSE hook: connects to /api/events, hydrates from /api/state, dispatches events.
+//
+// Hydration fetches the current server snapshot and applies it as a single
+// atomic "hydrate:snapshot" action so the reducer processes it in one pass.
+// After hydration, an EventSource streams incremental PipelineEvents.
 
 import { useEffect, useReducer, useRef } from "react";
-import type { PipelineEvent, UIState } from "../types";
+import type { PipelineEvent, HydrationSnapshot, UIState } from "../types";
 import { createInitialState, reducer } from "../state";
 
-const VALID_EVENT_TYPES = new Set([
+// ---------------------------------------------------------------------------
+// Event validation
+// ---------------------------------------------------------------------------
+
+/** All valid PipelineEvent type discriminants (must match the PipelineEvent union in types.ts). */
+const VALID_EVENT_TYPES: ReadonlySet<string> = new Set<PipelineEvent["type"]>([
   "connected",
-  "pipeline:start",
-  "pipeline:phase",
-  "pipeline:complete",
-  "audit:start",
-  "audit:branch:start",
-  "audit:branch:complete",
-  "audit:branch:fail",
-  "audit:complete",
-  "fix:start",
-  "fix:batch:start",
-  "fix:batch:attempt",
-  "fix:batch:check",
-  "fix:batch:complete",
-  "fix:complete",
-  "cost:estimate",
-  "cost:estimate:aggregated",
-  "cost:confirm-request",
+  "infra.pipeline.start",
+  "infra.pipeline.phase",
+  "infra.pipeline.complete",
+  "audit.start",
+  "audit.branch.start",
+  "audit.branch.complete",
+  "audit.branch.fail",
+  "audit.complete",
+  "fix.start",
+  "fix.batch.start",
+  "fix.batch.attempt",
+  "fix.batch.check",
+  "fix.batch.complete",
+  "fix.complete",
+  "infra.cost.estimate",
+  "infra.cost.estimate.aggregated",
+  "infra.cost.confirm.request",
   "log",
 ]);
 
+/** Runtime type guard for incoming SSE events. */
 function isValidEvent(data: unknown): data is PipelineEvent {
   if (data == null || typeof data !== "object") return false;
   const obj = data as Record<string, unknown>;
   return typeof obj.type === "string" && VALID_EVENT_TYPES.has(obj.type);
 }
 
+// ---------------------------------------------------------------------------
+// Module-level init guard — prevents double-hydration in React StrictMode
+// ---------------------------------------------------------------------------
+
+let didInit = false;
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
 export function useSSE(): UIState {
   const [state, dispatch] = useReducer(reducer, null, createInitialState);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // Guard against double-init in StrictMode dev remounts
+    if (didInit) return;
+    didInit = true;
+
     let eventSource: EventSource | null = null;
     let mounted = true;
     const abortController = new AbortController();
 
+    // ----- Hydration: fetch /api/state and apply as single snapshot -----
     async function hydrate() {
       try {
         const res = await fetch("/api/state", {
           signal: abortController.signal,
         });
         if (!res.ok || !mounted) return;
-        const snapshot = await res.json();
+        const snapshot: unknown = await res.json();
         if (!mounted) return;
 
-        // Replay snapshot as synthetic events
-        if (snapshot.phase !== "idle") {
+        // Dispatch a single atomic action — the reducer validates and maps fields
+        if (snapshot != null && typeof snapshot === "object") {
           dispatch({
-            type: "pipeline:start",
-            phase: snapshot.phase,
-            totalPolicies: snapshot.totalPolicies,
+            type: "hydrate:snapshot",
+            snapshot: snapshot as HydrationSnapshot,
           });
-        }
-        for (const [phase, status] of Object.entries(snapshot.phaseStatuses)) {
-          dispatch({
-            type: "pipeline:phase",
-            phase,
-            status: status as "started" | "completed",
-          });
-        }
-        if (snapshot.pipelineComplete) {
-          dispatch({
-            type: "pipeline:complete",
-            success: snapshot.pipelineSuccess,
-          });
-        }
-
-        // Hydrate audits
-        for (const audit of Object.values(snapshot.audits) as Array<{
-          policy: string;
-          branchCount: number;
-          processed: number;
-          succeeded: number;
-          failed: number;
-          branches: Record<
-            string,
-            {
-              status: string;
-              fileCount: number;
-              issueCount: number;
-              error?: string;
-            }
-          >;
-        }>) {
-          dispatch({
-            type: "audit:start",
-            policy: audit.policy,
-            branchCount: audit.branchCount,
-            policyIndex: 0,
-            totalPolicies: snapshot.totalPolicies,
-          });
-          for (const [branch, bState] of Object.entries(audit.branches)) {
-            dispatch({
-              type: "audit:branch:start",
-              branch,
-              fileCount: bState.fileCount,
-              policy: audit.policy,
-            });
-            if (bState.status === "done") {
-              dispatch({
-                type: "audit:branch:complete",
-                branch,
-                issueCount: bState.issueCount,
-                policy: audit.policy,
-              });
-            } else if (bState.status === "failed") {
-              dispatch({
-                type: "audit:branch:fail",
-                branch,
-                error: bState.error ?? "Unknown error",
-                policy: audit.policy,
-              });
-            }
-          }
-        }
-
-        // Hydrate fix state
-        if (snapshot.fix.totalBatches > 0) {
-          dispatch({
-            type: "fix:start",
-            totalBatches: snapshot.fix.totalBatches,
-            totalIssues: snapshot.fix.totalIssues,
-          });
-          for (const [numStr, batch] of Object.entries(
-            snapshot.fix.batches,
-          ) as Array<
-            [
-              string,
-              {
-                status: string;
-                fileCount: number;
-                issueCount: number;
-                attempt: number;
-                maxAttempts: number;
-              },
-            ]
-          >) {
-            const num = Number(numStr);
-            dispatch({
-              type: "fix:batch:start",
-              batchNum: num,
-              totalBatches: snapshot.fix.totalBatches,
-              fileCount: batch.fileCount,
-              issueCount: batch.issueCount,
-            });
-            if (batch.status === "done") {
-              dispatch({
-                type: "fix:batch:complete",
-                batchNum: num,
-                success: true,
-              });
-            } else if (batch.status === "failed") {
-              dispatch({
-                type: "fix:batch:complete",
-                batchNum: num,
-                success: false,
-              });
-            }
-          }
-        }
-
-        // Hydrate cost estimate
-        if (snapshot.costEstimate) {
-          dispatch({ type: "cost:estimate", estimate: snapshot.costEstimate });
-        }
-
-        // Hydrate aggregated cost estimate
-        if (snapshot.costEstimateAggregated) {
-          dispatch({
-            type: "cost:estimate:aggregated",
-            estimate: snapshot.costEstimateAggregated,
-          });
-        }
-
-        // Hydrate cost confirm request
-        if (snapshot.costConfirmRequest) {
-          dispatch({
-            type: "cost:confirm-request",
-            estimate: snapshot.costConfirmRequest.estimate,
-            requestId: snapshot.costConfirmRequest.requestId,
-          });
-        }
-
-        // Hydrate logs
-        for (const log of snapshot.logs ?? []) {
-          dispatch({ type: "log", ...log });
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        console.warn("SSE hydration failed:", err);
+        console.warn("[infra.sse.hydration.failed]", {
+          error: {
+            type: err instanceof Error ? err.name : "UnknownError",
+            message: err instanceof Error ? err.message : String(err),
+            retriable: true,
+          },
+        });
       }
     }
 
+    // ----- SSE connection -----
     function connect() {
       if (!mounted) return;
       eventSource = new EventSource("/api/events");
@@ -206,21 +103,36 @@ export function useSSE(): UIState {
         try {
           const parsed: unknown = JSON.parse(e.data);
           if (!isValidEvent(parsed)) {
-            console.warn("SSE received unknown event type:", parsed);
+            console.warn("[infra.sse.unknown_event]", {
+              raw_type:
+                parsed != null && typeof parsed === "object" && "type" in parsed
+                  ? (parsed as Record<string, unknown>).type
+                  : undefined,
+            });
             return;
           }
           dispatch(parsed);
         } catch (err) {
-          console.warn("SSE parse error:", err);
+          console.warn("[infra.sse.parse_error]", {
+            error: {
+              type: "ParseError",
+              message: err instanceof Error ? err.message : String(err),
+              retriable: false,
+            },
+            raw_length: e.data?.length,
+          });
         }
       };
 
       eventSource.onerror = () => {
         eventSource?.close();
-        if (mounted) {
-          if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-          reconnectTimer.current = setTimeout(connect, 2000);
-        }
+        if (!mounted) return;
+        // Clear any pending reconnect before scheduling a new one
+        if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+        console.warn("[infra.sse.connection.error]", {
+          reconnect_delay_ms: 2000,
+        });
+        reconnectTimer.current = setTimeout(connect, 2000);
       };
     }
 

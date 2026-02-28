@@ -53,11 +53,13 @@ export default function LogStream({ logs }: Props) {
     }
   }, []);
 
+  // Auto-scroll when new logs arrive (not on filter changes).
+  // Using logs.length ensures we only scroll on actual new entries.
   useEffect(() => {
     if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [filteredLogs, autoScroll]);
+  }, [logs.length, autoScroll]);
 
   const toggleFilter = (level: string) => {
     setFilters((prev) => {

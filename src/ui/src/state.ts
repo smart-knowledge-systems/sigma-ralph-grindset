@@ -1,6 +1,14 @@
-// State reducer: PipelineEvent -> UIState
+// State reducer: ReducerAction -> UIState
 
-import type { PipelineEvent, UIState } from "./types";
+import type {
+  ReducerAction,
+  UIState,
+  AuditState,
+  BranchState,
+  BatchState,
+  FixState,
+  HydrationSnapshot,
+} from "./types";
 
 export function createInitialState(): UIState {
   return {
@@ -26,10 +34,13 @@ export function createInitialState(): UIState {
   };
 }
 
-export function reducer(state: UIState, event: PipelineEvent): UIState {
+export function reducer(state: UIState, event: ReducerAction): UIState {
   switch (event.type) {
     case "connected":
       return { ...state, connected: true };
+
+    case "hydrate:snapshot":
+      return applySnapshot(state, event.snapshot);
 
     case "infra.pipeline.start":
       return {
@@ -281,4 +292,96 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
     default:
       return state;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot hydration — maps the /api/state response into UIState atomically.
+// All fields are defensively accessed since the snapshot is external data.
+// ---------------------------------------------------------------------------
+
+function toBranchStatus(raw: string): BranchState["status"] {
+  if (raw === "done" || raw === "failed") return raw;
+  return "running";
+}
+
+function toBatchStatus(raw: string): BatchState["status"] {
+  if (raw === "done" || raw === "failed") return raw;
+  return "running";
+}
+
+function toPhaseStatus(raw: string): "started" | "completed" {
+  return raw === "completed" ? "completed" : "started";
+}
+
+function applySnapshot(state: UIState, s: HydrationSnapshot): UIState {
+  // Build audit state
+  const audits: Record<string, AuditState> = {};
+  for (const [key, raw] of Object.entries(s.audits ?? {})) {
+    const branches: Record<string, BranchState> = {};
+    for (const [bKey, b] of Object.entries(raw.branches ?? {})) {
+      branches[bKey] = {
+        status: toBranchStatus(b.status),
+        fileCount: b.fileCount ?? 0,
+        issueCount: b.issueCount ?? 0,
+        error: b.error,
+      };
+    }
+    audits[key] = {
+      policy: raw.policy,
+      branchCount: raw.branchCount,
+      processed: raw.processed,
+      succeeded: raw.succeeded,
+      failed: raw.failed,
+      branches,
+    };
+  }
+
+  // Build fix state
+  const batches: Record<number, BatchState> = {};
+  for (const [numStr, raw] of Object.entries(s.fix?.batches ?? {})) {
+    const num = Number(numStr);
+    if (Number.isNaN(num)) continue;
+    batches[num] = {
+      status: toBatchStatus(raw.status),
+      fileCount: raw.fileCount ?? 0,
+      issueCount: raw.issueCount ?? 0,
+      attempt: raw.attempt ?? 1,
+      maxAttempts: raw.maxAttempts ?? 3,
+    };
+  }
+  const doneCount = Object.values(batches).filter(
+    (b) => b.status === "done",
+  ).length;
+  const failCount = Object.values(batches).filter(
+    (b) => b.status === "failed",
+  ).length;
+  const fix: FixState = {
+    totalBatches: s.fix?.totalBatches ?? 0,
+    totalIssues: s.fix?.totalIssues ?? 0,
+    fixed: doneCount,
+    failed: failCount,
+    batches,
+  };
+
+  // Build phase statuses with validated values
+  const phaseStatuses: Record<string, "started" | "completed"> = {};
+  for (const [phase, status] of Object.entries(s.phaseStatuses ?? {})) {
+    phaseStatuses[phase] = toPhaseStatus(status);
+  }
+
+  return {
+    ...state,
+    connected: true,
+    phase: s.phase ?? state.phase,
+    totalPolicies: s.totalPolicies ?? state.totalPolicies,
+    phaseStatuses,
+    pipelineComplete: s.pipelineComplete ?? false,
+    pipelineSuccess: s.pipelineSuccess ?? false,
+    audits,
+    fix,
+    costEstimate: s.costEstimate ?? null,
+    costEstimateAggregated: s.costEstimateAggregated ?? null,
+    costConfirmRequest: s.costConfirmRequest ?? null,
+    logs: [...state.logs, ...(s.logs ?? [])].slice(-500),
+  };
 }
