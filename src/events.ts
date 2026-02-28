@@ -85,7 +85,7 @@ type TypedHandler<T extends PipelineEvent["type"]> = (
 ) => void;
 
 class PipelineEventBus {
-  private anyHandlers: Handler[] = [];
+  private anyHandlers = new Set<Handler>();
   private typedHandlers = new Map<string, Handler[]>();
 
   emit(event: PipelineEvent): void {
@@ -109,9 +109,9 @@ class PipelineEventBus {
   }
 
   onAny(handler: Handler): () => void {
-    this.anyHandlers.push(handler);
+    this.anyHandlers.add(handler);
     return () => {
-      this.anyHandlers = this.anyHandlers.filter((h) => h !== handler);
+      this.anyHandlers.delete(handler);
     };
   }
 
@@ -147,7 +147,7 @@ class PipelineEventBus {
   }
 
   removeAllListeners(): void {
-    this.anyHandlers = [];
+    this.anyHandlers.clear();
     this.typedHandlers.clear();
   }
 }

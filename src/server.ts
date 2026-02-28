@@ -227,7 +227,7 @@ function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
         timestamp: event.timestamp,
       });
       if (state.logs.length > 500) {
-        state.logs = state.logs.slice(-500);
+        state.logs.shift();
       }
       break;
   }

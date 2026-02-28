@@ -49,9 +49,7 @@ export function parseAuditConf(
       } else {
         // Parse space-separated quoted or unquoted values
         const items: string[] = [];
-        const regex = /"([^"]*)"|'([^']*)'|(\S+)/g;
-        let match: RegExpExecArray | null;
-        while ((match = regex.exec(inner)) !== null) {
+        for (const match of inner.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) {
           items.push(match[1] ?? match[2] ?? match[3] ?? "");
         }
         result[key] = items;

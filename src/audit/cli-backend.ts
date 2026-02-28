@@ -77,7 +77,10 @@ export async function auditViaCli(
   const systemPrompt = buildSystemPrompt(config, policyNames);
   const userPrompt = buildUserPrompt(branchPath, files, config);
 
-  const schemaStr = JSON.stringify({ name: AUDIT_SCHEMA_NAME, ...AUDIT_JSON_SCHEMA });
+  const schemaStr = JSON.stringify({
+    name: AUDIT_SCHEMA_NAME,
+    ...AUDIT_JSON_SCHEMA,
+  });
 
   const args = [
     "claude",

@@ -88,21 +88,27 @@ export function cleanupLogs(success: boolean, baseDir: string): string | null {
   return null;
 }
 
-function writeToFile(level: string, msg: string): void {
+function writeToFile(level: string, msg: string, ts: string): void {
   if (!logFilePath) return;
   try {
-    appendFileSync(logFilePath, `[${timestamp()}] ${level} ${msg}\n`);
+    appendFileSync(logFilePath, `[${ts}] ${level} ${msg}\n`);
   } catch {
     // ignore file write errors
   }
 }
 
+// NOTE: This is a CLI tool — readerId/sessionId correlation IDs from the
+// logging policy do not apply. Consider adding a runId (generated at startup)
+// to tie all log lines from a single pipeline run together if needed.
 function write(level: LogLevel, msg: string): void {
+  // Capture timestamp once so the file log and event bus agree on timing
+  const ts = timestamp();
+
   // Always write to file at debug level
-  writeToFile(`[${level.toUpperCase()}]`, msg);
+  writeToFile(`[${level.toUpperCase()}]`, msg, ts);
 
   // Emit to event bus
-  events.emit({ type: "log", level, message: msg, timestamp: timestamp() });
+  events.emit({ type: "log", level, message: msg, timestamp: ts });
 
   // Console output respects LOG_LEVEL
   if (LEVEL_NUM[level] < consoleLevel) return;

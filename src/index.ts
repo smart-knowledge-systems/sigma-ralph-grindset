@@ -4,7 +4,7 @@
 
 import type { AuditMode, CliOptions } from "./types";
 import { loadConfig } from "./config";
-import { setLogLevel, initFileLogging, cleanupLogs } from "./logging";
+import { log, setLogLevel, initFileLogging, cleanupLogs } from "./logging";
 
 function printUsage(): void {
   console.log(`Usage: sigma <command> [options]
@@ -99,9 +99,15 @@ function parseArgs(argv: string[]): CliOptions {
       case "--dry-run":
         opts.dryRun = true;
         break;
-      case "--max-loc":
-        opts.maxLoc = parseInt(args[++i]!, 10);
+      case "--max-loc": {
+        const n = parseInt(args[++i]!, 10);
+        if (isNaN(n)) {
+          console.error("--max-loc requires a numeric value");
+          process.exit(1);
+        }
+        opts.maxLoc = n;
         break;
+      }
       case "--interactive":
         opts.interactive = true;
         break;
@@ -194,7 +200,7 @@ async function main(): Promise<void> {
     if (opts.ui) {
       const { startConfigServer } = await import("./config/server");
       const srv = startConfigServer(config.auditDir);
-      console.log(`Config editor: http://localhost:${srv.port}`);
+      log.info(`Config editor: http://localhost:${srv.port}`);
       await openBrowser(`http://localhost:${srv.port}`);
       await new Promise<void>((r) =>
         process.on("SIGINT", () => {
@@ -222,7 +228,7 @@ async function main(): Promise<void> {
       const server = startServer();
       stopServer = server.stop;
       const url = `http://localhost:${server.port}`;
-      console.log(`Progress UI: ${url}`);
+      log.info(`Progress UI: ${url}`);
       await openBrowser(url);
     } catch {
       // Fall back to stdout-only if server fails
@@ -292,7 +298,7 @@ async function main(): Promise<void> {
     // Clean up file logs
     if (opts.command !== "branches") {
       const failedDir = cleanupLogs(success, config.auditDir);
-      if (failedDir) console.error(`Debug logs saved to: ${failedDir}`);
+      if (failedDir) log.error(`Debug logs saved to: ${failedDir}`);
     }
 
     // Keep server alive briefly for UI to catch final state
@@ -304,6 +310,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  log.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
