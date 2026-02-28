@@ -91,6 +91,12 @@ bun audit --cli
 
 Set `DEFAULT_MODE="cli"` in `audit.conf` (or via `bun config`) to make CLI the default.
 
+### Progress UI
+
+When running without `--stdout`, the pipeline launches a browser-based progress UI that shows real-time audit and fix status via SSE. Cost confirmation can be approved from either the UI or the CLI stdin prompt.
+
+For a full annotated walkthrough of the progress UI with screenshots, see [docs/walkthrough.md](docs/walkthrough.md).
+
 ## Configuration
 
 Configuration uses two files:
@@ -129,6 +135,7 @@ All CLI flags have corresponding `DEFAULT_*` config overrides so you don't have 
 │   ├── logging.ts          # Dual-output logger
 │   ├── pricing.ts          # Cost estimation
 │   └── server.ts           # Progress UI server (SSE)
+├── docs/                   # Walkthrough and design docs
 ├── legacy/                 # Original Bash implementation
 ├── policies/               # Active policies (auto-discovered)
 ├── .policies/              # Inactive policies (copy to policies/ to activate)
