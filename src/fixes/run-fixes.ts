@@ -175,6 +175,12 @@ export async function runFixes(
   });
   log.info(
     `Batches to fix: ${totalBatches} (${totalPending} issues, MAX_FIX_LOC=${config.maxFixLoc})`,
+    {
+      event: "fix.start",
+      totalBatches,
+      totalIssues: totalPending,
+      maxFixLoc: config.maxFixLoc,
+    },
   );
   log.info("");
 
@@ -186,8 +192,12 @@ export async function runFixes(
     const batchLabel = `batch ${batch.batchNum}/${totalBatches} (${summary})`;
 
     log.info("--------------------------------------");
-    log.info(`Fixing: ${batchLabel}`);
-    log.info(`  Files: ${batch.files.length}`);
+    log.info(`Fixing: ${batchLabel}`, {
+      event: "fix.batch.info",
+      batchNum: batch.batchNum,
+      totalBatches,
+      fileCount: batch.files.length,
+    });
 
     // Get issues for the files in this batch
     const issues = getPendingIssuesForFiles(config, batch.files);
@@ -198,13 +208,17 @@ export async function runFixes(
     }
 
     const issueIds = issues.map((i) => i.id);
-    log.info(`  Issues: ${issues.length}`);
 
     // Get policies for these issues
     const policies = getPoliciesForIssues(config, issueIds);
-    if (policies.length > 0) {
-      log.info(`  Policies: ${policies.join(", ")}`);
-    }
+    log.info(
+      `  Issues: ${issues.length}, Policies: ${policies.join(", ") || "(none)"}`,
+      {
+        event: "fix.batch.issues",
+        issueCount: issues.length,
+        policies,
+      },
+    );
 
     // Build prompts
     const systemPrompt = await buildFixSystemPrompt(

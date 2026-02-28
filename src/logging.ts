@@ -9,6 +9,9 @@ import { events } from "./events";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
+/** Optional structured metadata attached to log entries for structured logging. */
+export type LogMeta = Record<string, unknown>;
+
 const LEVEL_NUM: Record<LogLevel, number> = {
   debug: 0,
   info: 1,
@@ -35,6 +38,10 @@ let errorCount = 0;
  * so all log lines from a single invocation can be correlated.
  */
 const runId: string = randomUUID();
+
+// Wire up runId to the event bus so ALL events (not just log events)
+// include the correlation ID automatically.
+events.setRunId(runId);
 
 function timestamp(): string {
   return new Date().toISOString();
@@ -112,13 +119,19 @@ export function cleanupLogs(success: boolean, baseDir: string): string | null {
   return null;
 }
 
-function writeToFile(level: string, msg: string, ts: string): void {
+function writeToFile(
+  level: string,
+  msg: string,
+  ts: string,
+  meta?: LogMeta,
+): void {
   if (!logFilePath) return;
   try {
-    appendFileSync(
-      logFilePath,
-      `[${ts}] [${runId.slice(0, 8)}] ${level} ${msg}\n`,
-    );
+    let line = `[${ts}] [${runId.slice(0, 8)}] ${level} ${msg}`;
+    if (meta && Object.keys(meta).length > 0) {
+      line += ` ${JSON.stringify(meta)}`;
+    }
+    appendFileSync(logFilePath, line + "\n");
   } catch {
     // ignore file write errors
   }
@@ -148,8 +161,9 @@ function sanitize(msg: string): string {
 
 // NOTE: This is a CLI tool — readerId/sessionId correlation IDs from the
 // logging policy do not apply. A runId is generated at startup to tie all
-// log lines from a single pipeline run together.
-function write(level: LogLevel, msg: string): void {
+// log lines from a single pipeline run together. The event bus also enriches
+// every emitted event with runId automatically (see events.setRunId above).
+function write(level: LogLevel, msg: string, meta?: LogMeta): void {
   const sanitized = sanitize(msg);
 
   // Capture timestamp once so the file log and event bus agree on timing
@@ -157,13 +171,20 @@ function write(level: LogLevel, msg: string): void {
 
   if (level === "error") errorCount++;
 
-  // Always write to file at debug level
-  writeToFile(`[${level.toUpperCase()}]`, sanitized, ts);
+  // Always write to file at debug level (includes structured metadata if present)
+  writeToFile(`[${level.toUpperCase()}]`, sanitized, ts, meta);
 
-  // Emit to event bus (includes runId for cross-event correlation)
-  events.emit({ type: "log", level, message: sanitized, timestamp: ts, runId });
+  // Emit to event bus (runId is attached automatically by the bus)
+  events.emit({
+    type: "log",
+    level,
+    message: sanitized,
+    timestamp: ts,
+    runId,
+    ...(meta ? { meta } : {}),
+  });
 
-  // Console output respects LOG_LEVEL
+  // Console output respects LOG_LEVEL (always human-readable strings)
   if (LEVEL_NUM[level] < consoleLevel) return;
 
   const color = LEVEL_COLORS[level];
@@ -178,8 +199,8 @@ function write(level: LogLevel, msg: string): void {
 }
 
 export const log = {
-  debug: (msg: string) => write("debug", msg),
-  info: (msg: string) => write("info", msg),
-  warn: (msg: string) => write("warn", msg),
-  error: (msg: string) => write("error", msg),
+  debug: (msg: string, meta?: LogMeta) => write("debug", msg, meta),
+  info: (msg: string, meta?: LogMeta) => write("info", msg, meta),
+  warn: (msg: string, meta?: LogMeta) => write("warn", msg, meta),
+  error: (msg: string, meta?: LogMeta) => write("error", msg, meta),
 };

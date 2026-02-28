@@ -111,6 +111,7 @@ export type PipelineEvent =
       message: string;
       timestamp: string;
       runId: string;
+      meta?: Record<string, unknown>;
     };
 
 type Handler = (event: PipelineEvent) => void;
@@ -121,8 +122,19 @@ type TypedHandler<T extends PipelineEvent["type"]> = (
 class PipelineEventBus {
   private anyHandlers = new Set<Handler>();
   private typedHandlers = new Map<string, Set<Handler>>();
+  private runId: string | null = null;
+
+  /** Set the pipeline run ID. Attached to every emitted event for correlation. */
+  setRunId(id: string): void {
+    this.runId = id;
+  }
 
   emit(event: PipelineEvent): void {
+    // Enrich every event with runId for cross-event correlation
+    if (this.runId) {
+      Object.assign(event, { runId: this.runId });
+    }
+
     for (const handler of this.anyHandlers) {
       try {
         handler(event);

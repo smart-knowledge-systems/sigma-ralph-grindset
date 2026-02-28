@@ -102,9 +102,18 @@ export async function fixBatch(opts: FixBatchOptions): Promise<boolean> {
     const exitCode = await proc.exited;
 
     if (exitCode !== 0) {
-      log.error(`Claude CLI failed for ${batchLabel}: exit code ${exitCode}`);
+      log.error(`Claude CLI failed for ${batchLabel}: exit code ${exitCode}`, {
+        event: "fix.cli.failed",
+        error: {
+          type: "ProcessError",
+          message: "Claude CLI exited non-zero",
+          code: exitCode,
+        },
+        batchLabel,
+        attempt,
+      });
       if (stderrText.trim()) {
-        log.error(`  stderr: ${stderrText.trim().slice(0, 500)}`);
+        log.debug(`  stderr: ${stderrText.trim().slice(0, 500)}`);
       }
       updateFixAttempt(config, attemptId, "failed", {
         claudeOutput: claudeOutput.slice(0, 4000),
@@ -180,7 +189,12 @@ export async function fixBatch(opts: FixBatchOptions): Promise<boolean> {
 
     // Check failed
     events.emit({ type: "fix.batch.check", batchNum, passed: false });
-    log.warn(`bun check failed (attempt ${attempt}/${MAX_RETRIES})`);
+    log.warn(`bun check failed (attempt ${attempt}/${MAX_RETRIES})`, {
+      event: "fix.check.failed",
+      attempt,
+      maxAttempts: MAX_RETRIES,
+      batchLabel,
+    });
     if (checkStderr.trim()) {
       log.debug(`  check stderr: ${checkStderr.trim().slice(0, 500)}`);
     }
@@ -189,7 +203,11 @@ export async function fixBatch(opts: FixBatchOptions): Promise<boolean> {
     });
 
     if (attempt === MAX_RETRIES) {
-      log.error(`All retries exhausted for ${batchLabel}`);
+      log.error(`All retries exhausted for ${batchLabel}`, {
+        event: "fix.retries.exhausted",
+        batchLabel,
+        maxAttempts: MAX_RETRIES,
+      });
       if (!skipCommits) {
         // Revert changes
         Bun.spawnSync(["git", "checkout", "--", "."], {

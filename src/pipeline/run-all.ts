@@ -69,6 +69,11 @@ export async function runPipeline(
       phase: "pipeline",
       totalPolicies: policies.length,
     });
+    log.info(`Discovered ${policies.length} policies: ${policies.join(", ")}`, {
+      event: "infra.pipeline.policies",
+      policyCount: policies.length,
+      policies,
+    });
 
     // Step 1: Generate branches (skip in diff mode)
     if (!opts.diffMode) {
@@ -224,7 +229,10 @@ export async function runPipeline(
     }
     const failedDir = cleanupLogs(pipelineSuccess, config.auditDir);
     if (failedDir) {
-      log.error(`Logs saved to: ${failedDir}`);
+      log.error(`Logs saved to: ${failedDir}`, {
+        event: "infra.pipeline.logs.saved",
+        logDir: failedDir,
+      });
     }
   }
 }
