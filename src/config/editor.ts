@@ -257,6 +257,11 @@ export function validateField(
   return null;
 }
 
+/** Escape a string for safe embedding in double-quoted bash values. */
+function escapeForBash(val: string): string {
+  return val.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 /** Serialize config values to bash-format string with section comments. */
 export function serializeConfig(values: ConfigValues): string {
   const lines: string[] = [];
@@ -291,7 +296,9 @@ export function serializeConfig(values: ConfigValues): string {
         if (arr.length === 0) {
           lines.push(`${field.key}=()`);
         } else {
-          const quoted = arr.map((s) => `"${s}"`).join(" ");
+          const quoted = arr
+            .map((s) => `"${escapeForBash(String(s))}"`)
+            .join(" ");
           lines.push(`${field.key}=(${quoted})`);
         }
       } else if (
@@ -299,7 +306,7 @@ export function serializeConfig(values: ConfigValues): string {
         field.type === "model" ||
         field.type === "enum"
       ) {
-        lines.push(`${field.key}="${val}"`);
+        lines.push(`${field.key}="${escapeForBash(String(val))}"`);
       } else if (field.type === "number") {
         lines.push(`${field.key}=${val}`);
       } else if (field.type === "boolean") {

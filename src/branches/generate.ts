@@ -30,8 +30,10 @@ function hasSourceSubdirs(dir: string, config: AuditConfig): boolean {
       const files = findSourceFiles(subdir, false, config);
       if (files.length > 0) return true;
     }
-  } catch {
-    // skip
+  } catch (e) {
+    log.debug(
+      `Cannot read directory for subdirectory check: ${dir} — ${e instanceof Error ? e.message : "unknown error"}`,
+    );
   }
   return false;
 }
@@ -51,8 +53,10 @@ function getSourceSubdirs(dir: string, config: AuditConfig): string[] {
       const files = findSourceFiles(subdir, false, config);
       if (files.length > 0) result.push(subdir);
     }
-  } catch {
-    // skip
+  } catch (e) {
+    log.debug(
+      `Cannot read directory for subdirectory listing: ${dir} — ${e instanceof Error ? e.message : "unknown error"}`,
+    );
   }
   return result.sort();
 }

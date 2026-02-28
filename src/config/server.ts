@@ -19,34 +19,53 @@ export function startConfigServer(auditDir: string): {
 } {
   const distDir = resolve(import.meta.dir, "..", "ui", "dist-config");
 
-  const server = Bun.serve({
+  // Container breaks the circular type reference between `server` and
+  // the route handlers that read `server.port` at request time.
+  const ctx: { server?: ReturnType<typeof Bun.serve> } = {};
+  const getOrigin = (): string => `http://localhost:${ctx.server!.port}`;
+
+  ctx.server = Bun.serve({
     port: 0,
     routes: {
       "/api/config": {
-        GET() {
+        GET(): Response {
           log.debug("Config server: reading configuration");
           const values = readConfig(auditDir);
+          const origin: string = getOrigin();
           return Response.json(
             { fields: CONFIG_FIELDS, values },
-            { headers: { "Access-Control-Allow-Origin": "*" } },
+            { headers: { "Access-Control-Allow-Origin": origin } },
           );
         },
         async PUT(req: Request) {
+          const origin: string = getOrigin();
           const body = await req.json();
           if (!body || typeof body !== "object" || Array.isArray(body)) {
             return Response.json(
               { errors: { _: "Request body must be a JSON object" } },
               {
                 status: 400,
-                headers: { "Access-Control-Allow-Origin": "*" },
+                headers: { "Access-Control-Allow-Origin": origin },
               },
             );
           }
-          const values = body as ConfigValues;
-          const errors: Record<string, string> = {};
 
+          // Filter to known config keys only — reject unknown properties
+          const sanitized: ConfigValues = {};
           for (const field of CONFIG_FIELDS) {
-            const val = values[field.key];
+            const val = (body as Record<string, unknown>)[field.key];
+            if (val !== undefined) {
+              sanitized[field.key] = val as
+                | string
+                | string[]
+                | number
+                | boolean;
+            }
+          }
+
+          const errors: Record<string, string> = {};
+          for (const field of CONFIG_FIELDS) {
+            const val = sanitized[field.key];
             if (val === undefined) continue;
             const err = validateField(field, val);
             if (err) errors[field.key] = err;
@@ -57,23 +76,24 @@ export function startConfigServer(auditDir: string): {
               { errors },
               {
                 status: 400,
-                headers: { "Access-Control-Allow-Origin": "*" },
+                headers: { "Access-Control-Allow-Origin": origin },
               },
             );
           }
 
-          writeConfig(auditDir, values);
+          writeConfig(auditDir, sanitized);
           log.info("Config server: configuration updated");
           return Response.json(
             { ok: true },
-            { headers: { "Access-Control-Allow-Origin": "*" } },
+            { headers: { "Access-Control-Allow-Origin": origin } },
           );
         },
         OPTIONS() {
+          const origin: string = getOrigin();
           return new Response(null, {
             status: 204,
             headers: {
-              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Origin": origin,
               "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
               "Access-Control-Allow-Headers": "Content-Type",
             },
@@ -115,9 +135,9 @@ export function startConfigServer(auditDir: string): {
   });
 
   return {
-    port: server.port as number,
+    port: ctx.server.port as number,
     stop() {
-      server.stop();
+      ctx.server!.stop();
     },
   };
 }

@@ -2,19 +2,39 @@
 // LOC-based file batching for fix processing
 // ============================================================================
 
-import { readFileSync, existsSync } from "fs";
+import { existsSync } from "fs";
 import { resolve } from "path";
 import type { AuditConfig, FileWithLoc, FixBatch } from "../types";
 import { getDb } from "../db";
 import { log } from "../logging";
 
 /**
- * Get distinct file paths from all pending issues, with LOC counts.
+ * Count lines in a file using async I/O (avoids blocking the event loop).
+ * Returns 0 if the file cannot be read.
  */
-export function getFixFilesWithLoc(
+async function countFileLines(
+  fullPath: string,
+  relPath: string,
+): Promise<number> {
+  try {
+    const content = await Bun.file(fullPath).text();
+    return content.split("\n").length;
+  } catch (e) {
+    log.warn(
+      `Failed to read file for LOC count: ${relPath} — ${e instanceof Error ? e.message : "unknown error"}`,
+    );
+    return 0;
+  }
+}
+
+/**
+ * Get distinct file paths from all pending issues, with LOC counts.
+ * Uses async file reading to avoid blocking the event loop on large codebases.
+ */
+export async function getFixFilesWithLoc(
   config: AuditConfig,
   policyFilter?: string,
-): FileWithLoc[] {
+): Promise<FileWithLoc[]> {
   const d = getDb(config);
 
   const sql = policyFilter
@@ -34,24 +54,23 @@ export function getFixFilesWithLoc(
        WHERE i.fix_status = 'pending'
        ORDER BY f.path`;
 
+  // Parameterized query — policy filter uses ? binding, never string interpolation
   const rows = (
     policyFilter ? d.prepare(sql).all(policyFilter) : d.prepare(sql).all()
   ) as Array<{ path: string }>;
 
-  return rows.map((row) => {
-    const fullPath = resolve(config.projectRoot, row.path);
-    let loc = 0;
-    if (existsSync(fullPath)) {
-      try {
-        loc = readFileSync(fullPath, "utf-8").split("\n").length;
-      } catch (e) {
-        log.warn(
-          `Failed to read file for LOC count: ${row.path} — ${e instanceof Error ? e.message : "unknown error"}`,
-        );
-      }
-    }
-    return { path: row.path, loc };
-  });
+  // Read all files concurrently for LOC counting
+  const results = await Promise.all(
+    rows.map(async (row) => {
+      const fullPath = resolve(config.projectRoot, row.path);
+      const loc = existsSync(fullPath)
+        ? await countFileLines(fullPath, row.path)
+        : 0;
+      return { path: row.path, loc };
+    }),
+  );
+
+  return results;
 }
 
 /**

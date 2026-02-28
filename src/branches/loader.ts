@@ -89,8 +89,10 @@ export function getDiffFiles(config: AuditConfig, diffRef?: string): string[] {
         `git diff --name-only --diff-filter=d ${diffRef}`,
         opts,
       );
-    } catch {
-      // ignore
+    } catch (e) {
+      log.debug(
+        `git diff failed for ref ${diffRef}: ${e instanceof Error ? e.message : "unknown error"}`,
+      );
     }
   } else {
     // Staged + unstaged
@@ -99,13 +101,17 @@ export function getDiffFiles(config: AuditConfig, diffRef?: string): string[] {
         "git diff --cached --name-only --diff-filter=d",
         opts,
       );
-    } catch {
-      // ignore
+    } catch (e) {
+      log.debug(
+        `git diff --cached failed: ${e instanceof Error ? e.message : "unknown error"}`,
+      );
     }
     try {
       rawFiles += "\n" + execSync("git diff --name-only --diff-filter=d", opts);
-    } catch {
-      // ignore
+    } catch (e) {
+      log.debug(
+        `git diff failed: ${e instanceof Error ? e.message : "unknown error"}`,
+      );
     }
   }
 
@@ -113,8 +119,10 @@ export function getDiffFiles(config: AuditConfig, diffRef?: string): string[] {
   try {
     rawFiles +=
       "\n" + execSync("git ls-files --others --exclude-standard", opts);
-  } catch {
-    // ignore
+  } catch (e) {
+    log.debug(
+      `git ls-files failed: ${e instanceof Error ? e.message : "unknown error"}`,
+    );
   }
 
   const seen = new Set<string>();

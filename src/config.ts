@@ -47,7 +47,8 @@ export function parseAuditConf(
       if (!inner) {
         result[key] = [];
       } else {
-        // Parse space-separated quoted or unquoted values
+        // Parse space-separated quoted or unquoted values.
+        // Regex is a static literal — no user input in the pattern, so no injection risk.
         const items: string[] = [];
         for (const match of inner.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) {
           items.push(match[1] ?? match[2] ?? match[3] ?? "");

@@ -4,6 +4,26 @@
 
 import type { CostEstimate, PerBranchCostEstimate } from "./types";
 
+/**
+ * Sanitize an error string for safe inclusion in events.
+ * Strips URLs (may contain tokens), truncates to a safe length,
+ * and redacts patterns that look like API keys or tokens.
+ */
+export function sanitizeErrorForEvent(error: string): string {
+  return (
+    error
+      // Strip URLs that may contain tokens/credentials
+      .replace(/https?:\/\/\S+/g, "[URL redacted]")
+      // Redact strings that look like API keys (sk-..., key-..., etc.)
+      .replace(
+        /\b(sk|key|token|bearer|auth)[_-]?[A-Za-z0-9]{20,}\b/gi,
+        "[credential redacted]",
+      )
+      // Truncate to 1000 chars max
+      .slice(0, 1000)
+  );
+}
+
 export type PipelineEvent =
   | { type: "pipeline:start"; phase: string; totalPolicies: number }
   | { type: "pipeline:phase"; phase: string; status: "started" | "completed" }
@@ -96,8 +116,11 @@ class PipelineEventBus {
     for (const handler of this.anyHandlers) {
       try {
         handler(event);
-      } catch {
-        // fire-and-forget
+      } catch (e) {
+        // Log handler errors to stderr so failures are diagnosable
+        process.stderr.write(
+          `[EventBus] Handler error on ${event.type}: ${e instanceof Error ? e.message : String(e)}\n`,
+        );
       }
     }
     const handlers = this.typedHandlers.get(event.type);
@@ -105,8 +128,10 @@ class PipelineEventBus {
       for (const handler of handlers) {
         try {
           handler(event);
-        } catch {
-          // fire-and-forget
+        } catch (e) {
+          process.stderr.write(
+            `[EventBus] Handler error on ${event.type}: ${e instanceof Error ? e.message : String(e)}\n`,
+          );
         }
       }
     }

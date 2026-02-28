@@ -150,7 +150,7 @@ export async function runFixes(
   }
 
   // Build LOC-based batches
-  const filesWithLoc = getFixFilesWithLoc(config, opts.policyFilter);
+  const filesWithLoc = await getFixFilesWithLoc(config, opts.policyFilter);
   if (filesWithLoc.length === 0) {
     log.info("No pending issues to fix.");
     return { fixed: 0, failed: 0 };

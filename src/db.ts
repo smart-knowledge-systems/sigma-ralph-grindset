@@ -95,7 +95,8 @@ export function initDatabase(config: AuditConfig): Database {
     );
   `);
 
-  // Migrations: add columns if missing
+  // Migrations: add columns if missing.
+  // Cast is trusted: PRAGMA table_info always returns rows with a `name` column.
   const scanCols = d.prepare("PRAGMA table_info(scans)").all() as Array<{
     name: string;
   }>;
@@ -206,6 +207,7 @@ export function insertIssue(
 export function ensureFile(config: AuditConfig, path: string): number {
   const d = getDb(config);
   d.prepare(`INSERT OR IGNORE INTO files (path) VALUES (?)`).run(path);
+  // Cast is trusted: SELECT id FROM files always returns { id: number } or null.
   const row = d.prepare(`SELECT id FROM files WHERE path=?`).get(path) as {
     id: number;
   } | null;
@@ -270,6 +272,7 @@ export function getCheckpointCommit(
 ): string | null {
   const d = getDb(config);
   const placeholders = policies.map(() => "?").join(",");
+  // Cast is trusted: query returns a single column matching the schema.
   const row = d
     .prepare(
       `SELECT git_commit FROM audit_checkpoints WHERE policy IN (${placeholders}) ORDER BY completed_at ASC LIMIT 1`,
@@ -323,6 +326,7 @@ export function getPendingIssuesForFiles(
   const issueIds = idRows.map((r) => r.id);
   const idPlaceholders = issueIds.map(() => "?").join(",");
 
+  // Cast is trusted: column names and types match the schema + GROUP_CONCAT aliases.
   return d
     .prepare(
       `SELECT

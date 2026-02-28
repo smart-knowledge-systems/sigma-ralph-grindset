@@ -5,6 +5,7 @@
 import { type Dirent, readdirSync, readFileSync } from "fs";
 import { resolve, extname, relative } from "path";
 import type { AuditConfig } from "../types";
+import { log } from "../logging";
 
 /** Check if a filename matches configured extensions. */
 export function matchesExtensions(
@@ -57,8 +58,10 @@ export function countLoc(filePaths: string[]): number {
     try {
       const content = readFileSync(fp, "utf-8");
       total += content.split("\n").length;
-    } catch {
-      // skip unreadable files
+    } catch (e) {
+      log.debug(
+        `Skipping unreadable file for LOC count: ${fp} — ${e instanceof Error ? e.message : "unknown error"}`,
+      );
     }
   }
   return total;
@@ -81,7 +84,10 @@ export function findSourceFiles(
     let entries: Dirent[];
     try {
       entries = readdirSync(currentDir, { withFileTypes: true });
-    } catch {
+    } catch (e) {
+      log.debug(
+        `Cannot read directory: ${currentDir} — ${e instanceof Error ? e.message : "unknown error"}`,
+      );
       return;
     }
 
@@ -114,8 +120,10 @@ export function findSourceFiles(
           results.push(fullPath);
         }
       }
-    } catch {
-      // skip
+    } catch (e) {
+      log.debug(
+        `Cannot read directory for flat scan: ${dir} — ${e instanceof Error ? e.message : "unknown error"}`,
+      );
     }
   } else {
     scan(dir, 0);
@@ -141,11 +149,17 @@ export function extractImports(filePath: string): string[] {
   let content: string;
   try {
     content = readFileSync(filePath, "utf-8");
-  } catch {
+  } catch (e) {
+    log.debug(
+      `Cannot read file for import extraction: ${filePath} — ${e instanceof Error ? e.message : "unknown error"}`,
+    );
     return [];
   }
 
   const imports = new Set<string>();
+  // NOTE: This regex matches single-line import/export statements only.
+  // Multi-line imports (e.g., destructured imports spanning multiple lines)
+  // will not be matched. This is an acceptable limitation for branch generation.
   const importRegex =
     /^\s*(?:import|export)\s.*\sfrom\s+['"]([@./][^'"]+)['"]/gm;
   let match: RegExpExecArray | null;

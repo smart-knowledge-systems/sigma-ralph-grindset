@@ -109,20 +109,44 @@ function writeToFile(level: string, msg: string, ts: string): void {
   }
 }
 
+/**
+ * Sanitize a log message by redacting patterns that may contain PII or secrets.
+ * Strips API keys, bearer tokens, emails, and authorization headers.
+ */
+function sanitize(msg: string): string {
+  return (
+    msg
+      // Redact API keys and tokens (sk-..., key-..., etc.)
+      .replace(
+        /\b(sk|key|token|bearer|auth)[_-]?[A-Za-z0-9]{20,}\b/gi,
+        "[credential redacted]",
+      )
+      // Redact email addresses
+      .replace(
+        /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z]{2,}\b/gi,
+        "[email redacted]",
+      )
+      // Redact Authorization headers
+      .replace(/Authorization:\s*\S+/gi, "Authorization: [redacted]")
+  );
+}
+
 // NOTE: This is a CLI tool — readerId/sessionId correlation IDs from the
 // logging policy do not apply. Consider adding a runId (generated at startup)
 // to tie all log lines from a single pipeline run together if needed.
 function write(level: LogLevel, msg: string): void {
+  const sanitized = sanitize(msg);
+
   // Capture timestamp once so the file log and event bus agree on timing
   const ts = timestamp();
 
   if (level === "error") errorCount++;
 
   // Always write to file at debug level
-  writeToFile(`[${level.toUpperCase()}]`, msg, ts);
+  writeToFile(`[${level.toUpperCase()}]`, sanitized, ts);
 
   // Emit to event bus
-  events.emit({ type: "log", level, message: msg, timestamp: ts });
+  events.emit({ type: "log", level, message: sanitized, timestamp: ts });
 
   // Console output respects LOG_LEVEL
   if (LEVEL_NUM[level] < consoleLevel) return;
@@ -132,9 +156,9 @@ function write(level: LogLevel, msg: string): void {
     level === "info" ? "" : `${color}[${level.toUpperCase()}]${RESET} `;
 
   if (level === "error" || level === "warn" || level === "debug") {
-    process.stderr.write(`${prefix}${msg}\n`);
+    process.stderr.write(`${prefix}${sanitized}\n`);
   } else {
-    process.stdout.write(`${prefix}${msg}\n`);
+    process.stdout.write(`${prefix}${sanitized}\n`);
   }
 }
 
