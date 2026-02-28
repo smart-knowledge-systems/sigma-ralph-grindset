@@ -67,6 +67,8 @@ export async function processBranch(
     totalLoc,
   );
 
+  const startTime = performance.now();
+
   try {
     let result: AuditResult;
 
@@ -90,6 +92,8 @@ export async function processBranch(
       const cost = computeActualCost(config.auditModel, apiResult.usage, false);
       updateScanUsage(config, scanId, apiResult.usage, cost);
     }
+
+    const durationMs = Math.round(performance.now() - startTime);
 
     // Store issues
     let issueCount = 0;
@@ -120,13 +124,23 @@ export async function processBranch(
       issueCount,
       policy: policyLabel,
     });
-    log.info(`  Completed: ${issueCount} issues found`);
+    log.info(`  Completed: ${issueCount} issues found (${durationMs}ms)`);
 
     return { success: true, issueCount };
   } catch (e: unknown) {
+    const durationMs = Math.round(performance.now() - startTime);
     const err = e instanceof Error ? e : new Error(String(e));
-    const errorType = (e as { errorType?: string }).errorType;
-    const stderr = (e as { stderr?: string }).stderr;
+
+    // Extract custom properties with type guards instead of `as` casts
+    const errorType =
+      e !== null && typeof e === "object" && "errorType" in e
+        ? String((e as { errorType: unknown }).errorType)
+        : undefined;
+    const stderr =
+      e !== null && typeof e === "object" && "stderr" in e
+        ? String((e as { stderr: unknown }).stderr)
+        : undefined;
+
     const errorMsg = stderr
       ? `${err.message}: ${stderr.slice(0, 500)}`
       : err.message;
@@ -139,7 +153,7 @@ export async function processBranch(
       error: err.message,
       policy: policyLabel,
     });
-    log.error(`Failed for ${branchLabel}: ${err.message}`);
+    log.error(`Failed for ${branchLabel} (${durationMs}ms): ${err.message}`);
     return { success: false, issueCount: 0, errorType };
   }
 }

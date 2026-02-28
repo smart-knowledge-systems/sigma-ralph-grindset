@@ -36,28 +36,45 @@ Review the provided code and identify violations of the guidelines below. For ea
 - Each issue must include at least one file path
 - For the policy field, use the exact policy name from the section headers below`;
 
+/** Module-level cache for file reads to avoid repeated I/O for the same path. */
+const fileContentCache = new Map<string, string | null>();
+
+/** Read a file with caching. Returns content or null if unavailable/empty. */
+function cachedReadFile(path: string): string | null {
+  if (fileContentCache.has(path)) return fileContentCache.get(path)!;
+  if (!existsSync(path)) {
+    fileContentCache.set(path, null);
+    return null;
+  }
+  try {
+    const content = readFileSync(path, "utf-8");
+    const result = content.trim() ? content : null;
+    fileContentCache.set(path, result);
+    return result;
+  } catch {
+    fileContentCache.set(path, null);
+    return null;
+  }
+}
+
 /** Load and return the text content of a single policy file, or null if unavailable. */
 function loadPolicyText(
   config: AuditConfig,
   policyName: string,
 ): string | null {
   const policyFile = resolve(config.policiesDir, policyName, "POLICY.md");
-  if (!existsSync(policyFile)) return null;
-  try {
-    const content = readFileSync(policyFile, "utf-8");
-    return content.trim() ? content : null;
-  } catch {
-    return null;
-  }
+  return cachedReadFile(policyFile);
 }
 
-/** Build the system prompt with audit instructions and policy text. */
-export function buildSystemPrompt(
+/**
+ * Load and format all policies into a single text block.
+ * Shared by buildSystemPrompt and buildSystemPromptBlocks.
+ */
+function loadFormattedPolicies(
   config: AuditConfig,
   policyNames: string[],
-): string {
-  let prompt = AUDIT_INSTRUCTIONS + "\n\n";
-
+): { text: string; loaded: number } {
+  let text = "";
   let loaded = 0;
   for (const policyName of policyNames) {
     const content = loadPolicyText(config, policyName);
@@ -65,15 +82,25 @@ export function buildSystemPrompt(
       log.warn(`Policy file not found or empty: ${policyName}, skipping`);
       continue;
     }
-    prompt += `\n## Guidelines: ${policyName}\n\n${content}\n`;
+    text += `\n## Guidelines: ${policyName}\n\n${content}\n`;
     loaded++;
   }
+  return { text, loaded };
+}
 
+/** Build the system prompt with audit instructions and policy text. */
+export function buildSystemPrompt(
+  config: AuditConfig,
+  policyNames: string[],
+): string {
+  const { text: policyText, loaded } = loadFormattedPolicies(
+    config,
+    policyNames,
+  );
   if (loaded === 0) {
     throw new Error("No valid policy files loaded");
   }
-
-  return prompt;
+  return AUDIT_INSTRUCTIONS + "\n\n" + policyText;
 }
 
 /**
@@ -88,14 +115,7 @@ export function buildSystemPromptBlocks(
   text: string;
   cache_control?: { type: "ephemeral" };
 }> {
-  let policyText = "";
-  for (const policyName of policyNames) {
-    const content = loadPolicyText(config, policyName);
-    if (content) {
-      policyText += `\n## Guidelines: ${policyName}\n\n${content}\n`;
-    }
-  }
-
+  const { text: policyText } = loadFormattedPolicies(config, policyNames);
   return [
     { type: "text", text: AUDIT_INSTRUCTIONS },
     { type: "text", text: policyText, cache_control: { type: "ephemeral" } },

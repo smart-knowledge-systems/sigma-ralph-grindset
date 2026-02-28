@@ -12,52 +12,11 @@ import {
   buildUserPrompt,
   buildUserPromptForPolicy,
 } from "./prompts";
-import { AUDIT_JSON_SCHEMA } from "./schema";
+import { AUDIT_JSON_SCHEMA, validateAuditResult } from "./schema";
 
-/**
- * Validate parsed JSON against the AuditResult schema at runtime.
- * Returns a valid AuditResult with only well-formed issues, or
- * a fallback with empty issues if the top-level structure is wrong.
- */
-function validateAuditResult(parsed: unknown): AuditResult {
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("issues" in parsed) ||
-    !Array.isArray((parsed as Record<string, unknown>).issues)
-  ) {
-    log.warn("Parsed audit result missing 'issues' array, returning empty");
-    return { issues: [] };
-  }
-
-  const raw = parsed as { issues: unknown[] };
-  const validSeverities = new Set(["high", "medium", "low"]);
-  const issues = raw.issues.filter(
-    (item): item is AuditResult["issues"][number] => {
-      if (typeof item !== "object" || item === null) return false;
-      const o = item as Record<string, unknown>;
-      return (
-        typeof o.description === "string" &&
-        typeof o.rule === "string" &&
-        typeof o.severity === "string" &&
-        validSeverities.has(o.severity) &&
-        typeof o.suggestion === "string" &&
-        typeof o.policy === "string" &&
-        Array.isArray(o.files) &&
-        o.files.length >= 1 &&
-        o.files.every((f: unknown) => typeof f === "string")
-      );
-    },
-  );
-
-  if (issues.length < raw.issues.length) {
-    log.warn(
-      `Filtered ${raw.issues.length - issues.length} invalid issues from audit result`,
-    );
-  }
-
-  return { issues };
-}
+// ============================================================================
+// Shared helpers
+// ============================================================================
 
 let client: Anthropic | null = null;
 
@@ -67,6 +26,89 @@ function getClient(): Anthropic {
   }
   return client;
 }
+
+/** Build the output_config format block used by all API requests. */
+function buildOutputConfig() {
+  return {
+    format: {
+      type: "json_schema" as const,
+      schema: AUDIT_JSON_SCHEMA as unknown as Record<string, unknown>,
+    },
+  };
+}
+
+/**
+ * Extract token usage from an Anthropic API message usage object.
+ * Uses optional chaining with defaults — no unsafe casts needed since
+ * the SDK types include cache_creation_input_tokens and cache_read_input_tokens
+ * as `number | null`.
+ */
+function extractUsage(usage: Anthropic.Usage): TokenUsage {
+  return {
+    inputTokens: usage.input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+    cacheCreationInputTokens:
+      (usage as { cache_creation_input_tokens?: number | null })
+        .cache_creation_input_tokens ?? 0,
+    cacheReadInputTokens:
+      (usage as { cache_read_input_tokens?: number | null })
+        .cache_read_input_tokens ?? 0,
+  };
+}
+
+/** Extract and validate the AuditResult from an API message's text block. */
+function extractResultFromMessage(
+  content: Anthropic.ContentBlock[],
+): AuditResult {
+  const textBlock = content.find((b) => b.type === "text");
+  const rawJson = textBlock?.type === "text" ? textBlock.text : '{"issues":[]}';
+  const parsed = JSON.parse(rawJson);
+  return validateAuditResult(parsed);
+}
+
+/** Accumulate token usage into a running total. */
+function accumulateUsage(total: TokenUsage, usage: TokenUsage): void {
+  total.inputTokens += usage.inputTokens;
+  total.outputTokens += usage.outputTokens;
+  total.cacheCreationInputTokens += usage.cacheCreationInputTokens;
+  total.cacheReadInputTokens += usage.cacheReadInputTokens;
+}
+
+/** Create a slug from a path, capped to a max length. */
+function toSlug(value: string, maxLen: number): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, maxLen);
+}
+
+// ============================================================================
+// Common batch request builder
+// ============================================================================
+
+/**
+ * Create a single batch request object with standard parameters.
+ * Both buildBatchRequest and buildBatchRequestForBranch delegate here
+ * to avoid duplicating the request structure.
+ */
+function createBatchRequest(
+  customId: string,
+  system: Anthropic.MessageCreateParams["system"],
+  userPrompt: string,
+  model: string,
+): Anthropic.Messages.BatchCreateParams.Request {
+  return {
+    custom_id: customId,
+    params: {
+      model,
+      max_tokens: 16384,
+      system,
+      messages: [{ role: "user", content: userPrompt }],
+      output_config: buildOutputConfig(),
+    },
+  };
+}
+
+// ============================================================================
+// Single-request audit
+// ============================================================================
 
 /**
  * Single-request audit via the Anthropic API with structured output.
@@ -95,40 +137,31 @@ export async function auditViaApi(
     `API call: model=${model} branch=${branchPath} caching=${useCaching}`,
   );
 
+  const startTime = performance.now();
   const response = await c.messages.create({
     model,
     max_tokens: 16384,
     system,
     messages: [{ role: "user", content: userPrompt }],
-    output_config: {
-      format: {
-        type: "json_schema" as const,
-        schema: AUDIT_JSON_SCHEMA as unknown as Record<string, unknown>,
-      },
-    },
+    output_config: buildOutputConfig(),
   });
+  const durationMs = Math.round(performance.now() - startTime);
 
-  log.debug(`API response: request_id=${response.id}`);
-
-  // Extract structured output from text block (json_schema output_config)
-  const textBlock = response.content.find((b) => b.type === "text");
-  const parsed = JSON.parse(
-    textBlock?.type === "text" ? textBlock.text : '{"issues":[]}',
+  log.debug(
+    `API response: request_id=${response.id} duration_ms=${durationMs}`,
   );
-  const result = validateAuditResult(parsed);
 
-  const rawUsage = response.usage as unknown as Record<string, number>;
-  const usage: TokenUsage = {
-    inputTokens: rawUsage.input_tokens ?? 0,
-    outputTokens: rawUsage.output_tokens ?? 0,
-    cacheCreationInputTokens: rawUsage.cache_creation_input_tokens ?? 0,
-    cacheReadInputTokens: rawUsage.cache_read_input_tokens ?? 0,
-  };
+  const result = extractResultFromMessage(response.content);
+  const usage = extractUsage(response.usage);
 
   return { result, usage };
 }
 
-/** Build a batch request for a single branch audit. */
+// ============================================================================
+// Combined batch audit (single policy, all branches in one batch)
+// ============================================================================
+
+/** Build a batch request for a single branch audit (combined policy mode). */
 function buildBatchRequest(
   branchPath: string,
   files: string[],
@@ -146,21 +179,13 @@ function buildBatchRequest(
         text: b.text,
       }));
 
-  return {
-    custom_id: `audit-${branchPath.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 57)}`,
-    params: {
-      model,
-      max_tokens: 16384,
-      system: system as Anthropic.MessageCreateParams["system"],
-      messages: [{ role: "user", content: userPrompt }],
-      output_config: {
-        format: {
-          type: "json_schema" as const,
-          schema: AUDIT_JSON_SCHEMA as unknown as Record<string, unknown>,
-        },
-      },
-    },
-  };
+  const customId = `audit-${toSlug(branchPath, 57)}`;
+  return createBatchRequest(
+    customId,
+    system as Anthropic.MessageCreateParams["system"],
+    userPrompt,
+    model,
+  );
 }
 
 /**
@@ -199,6 +224,7 @@ export async function* auditViaBatch(
 
   log.info(`Submitting batch of ${requests.length} audit requests...`);
 
+  const startTime = performance.now();
   const batch = await c.messages.batches.create({ requests });
   log.info(`Batch created: ${batch.id}`);
 
@@ -224,6 +250,9 @@ export async function* auditViaBatch(
       message: `Batch ${batch.id}: ${status} (${done}/${total} done, ${counts.succeeded} succeeded)`,
     };
   }
+
+  const durationMs = Math.round(performance.now() - startTime);
+  log.debug(`Batch polling completed in ${durationMs}ms`);
 
   // Collect results
   const totalUsage: TokenUsage = {
@@ -252,25 +281,9 @@ export async function* auditViaBatch(
     log.debug(
       `Batch result: custom_id=${result.custom_id} request_id=${message.id}`,
     );
-    // Extract structured output from text block (json_schema output_config)
-    const textBlock = message.content.find((b) => b.type === "text");
-    const rawParsed = JSON.parse(
-      textBlock?.type === "text" ? textBlock.text : '{"issues":[]}',
-    );
-    const parsed = validateAuditResult(rawParsed);
-
-    const msgUsage = message.usage as unknown as Record<string, number>;
-    const usage: TokenUsage = {
-      inputTokens: msgUsage.input_tokens ?? 0,
-      outputTokens: msgUsage.output_tokens ?? 0,
-      cacheCreationInputTokens: msgUsage.cache_creation_input_tokens ?? 0,
-      cacheReadInputTokens: msgUsage.cache_read_input_tokens ?? 0,
-    };
-
-    totalUsage.inputTokens += usage.inputTokens;
-    totalUsage.outputTokens += usage.outputTokens;
-    totalUsage.cacheCreationInputTokens += usage.cacheCreationInputTokens;
-    totalUsage.cacheReadInputTokens += usage.cacheReadInputTokens;
+    const parsed = extractResultFromMessage(message.content);
+    const usage = extractUsage(message.usage);
+    accumulateUsage(totalUsage, usage);
 
     yield {
       type: "result",
@@ -289,13 +302,8 @@ export async function* auditViaBatch(
 }
 
 // ============================================================================
-// Per-branch batch backend: one batch per branch, one request per policy
+// Per-branch batch audit (one batch per branch, one request per policy)
 // ============================================================================
-
-/** Create a slug from a path, capped to a max length. */
-function toSlug(value: string, maxLen: number): string {
-  return value.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, maxLen);
-}
 
 /**
  * Build a batch request for a single branch+policy combination
@@ -318,34 +326,14 @@ export function buildBatchRequestForBranch(
   // custom_id format: a-{branchSlug}-{policySlug} (max 64 chars)
   const branchSlug = toSlug(branchPath, 28);
   const policySlug = toSlug(policyName, 28);
-  const custom_id = `a-${branchSlug}-${policySlug}`.slice(0, 64);
+  const customId = `a-${branchSlug}-${policySlug}`.slice(0, 64);
 
-  return {
-    custom_id,
-    params: {
-      model,
-      max_tokens: 16384,
-      system: systemBlocks as Anthropic.MessageCreateParams["system"],
-      messages: [{ role: "user", content: userPrompt }],
-      output_config: {
-        format: {
-          type: "json_schema" as const,
-          schema: AUDIT_JSON_SCHEMA as unknown as Record<string, unknown>,
-        },
-      },
-    },
-  };
-}
-
-/** Extract token usage from an API message usage object. */
-function extractUsage(rawUsage: Record<string, unknown>): TokenUsage {
-  return {
-    inputTokens: (rawUsage.input_tokens as number) ?? 0,
-    outputTokens: (rawUsage.output_tokens as number) ?? 0,
-    cacheCreationInputTokens:
-      (rawUsage.cache_creation_input_tokens as number) ?? 0,
-    cacheReadInputTokens: (rawUsage.cache_read_input_tokens as number) ?? 0,
-  };
+  return createBatchRequest(
+    customId,
+    systemBlocks as Anthropic.MessageCreateParams["system"],
+    userPrompt,
+    model,
+  );
 }
 
 /**
@@ -373,7 +361,7 @@ export async function* auditViaBatchPerBranch(
 }> {
   const c = getClient();
 
-  // Build and submit one batch per branch
+  // Build and submit one batch per branch (all in parallel)
   type BatchInfo = {
     batchId: string;
     idToPolicy: Map<string, { branchPath: string; policyName: string }>;
@@ -424,6 +412,7 @@ export async function* auditViaBatchPerBranch(
   while (activeBatches.size > 0) {
     await Bun.sleep(pollInterval);
 
+    // Poll all active batches in parallel
     const pollResults = await Promise.all(
       [...activeBatches.keys()].map(async (batchId) => {
         const updated = await c.messages.batches.retrieve(batchId);
@@ -478,20 +467,9 @@ export async function* auditViaBatchPerBranch(
       }
 
       const message = result.result.message;
-      const textBlock = message.content.find((b) => b.type === "text");
-      const rawParsed = JSON.parse(
-        textBlock?.type === "text" ? textBlock.text : '{"issues":[]}',
-      );
-      const parsed = validateAuditResult(rawParsed);
-
-      const usage = extractUsage(
-        message.usage as unknown as Record<string, unknown>,
-      );
-
-      totalUsage.inputTokens += usage.inputTokens;
-      totalUsage.outputTokens += usage.outputTokens;
-      totalUsage.cacheCreationInputTokens += usage.cacheCreationInputTokens;
-      totalUsage.cacheReadInputTokens += usage.cacheReadInputTokens;
+      const parsed = extractResultFromMessage(message.content);
+      const usage = extractUsage(message.usage);
+      accumulateUsage(totalUsage, usage);
 
       yield {
         type: "result",
