@@ -1,13 +1,35 @@
 {
   "private": true,
   "scripts": {
-    "check": "shellcheck *.sh",
-    "format": "shfmt -w -i 4 -ci *.sh",
-    "test": "bats test/",
-    "test:unit": "bats test/lib.bats test/lib-fixes.bats test/logging.bats",
-    "test:integration": "bats test/database.bats"
+    "audit": "bun run src/index.ts audit",
+    "fix": "bun run src/index.ts fix",
+    "all": "bun run src/index.ts all",
+    "branches": "bun run src/index.ts branches",
+    "config": "bun run src/index.ts config",
+    "test": "bun test",
+    "test:unit": "bun test test/unit",
+    "test:legacy": "bats test/",
+    "typecheck": "bunx tsc --noEmit",
+    "check": "bun run typecheck && bun run lint",
+    "check:legacy": "shellcheck legacy/*.sh",
+    "lint": "bunx eslint --cache --cache-location node_modules/.cache/eslint/ src/",
+    "format": "bunx prettier --write -l --cache --cache-location node_modules/.cache/prettier/ src/",
+    "format:check": "bunx prettier --check --cache --cache-location node_modules/.cache/prettier/ src/",
+    "format:legacy": "shfmt -w -i 4 -ci legacy/*.sh",
+    "build:ui": "cd src/ui && bunx vite build",
+    "build:config-ui": "cd src/ui && bunx vite build --config vite.config.config.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0"
+  },
+  "overrides": {
+    "minimatch": ">=10.2.1"
   },
   "devDependencies": {
-    "shellcheck": "^4.1.0"
+    "bun-types": "^1.2.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "shellcheck": "^4.1.0",
+    "typescript-eslint": "^8.0.0"
   }
 }

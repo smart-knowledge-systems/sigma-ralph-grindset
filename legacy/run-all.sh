@@ -102,6 +102,10 @@ main() {
     # Progress footer
     source "${AUDIT_DIR}/progress.sh"
 
+    # Initialize debug-to-disk logging
+    log_init_file "$AUDIT_DIR"
+    local pipeline_status="failure"
+
     printf '%s\n' "=== Full Audit Pipeline ==="
     if [[ -n "$diff_mode" ]]; then
         printf '%s\n' "Mode: diff (changed files only)"
@@ -242,7 +246,21 @@ main() {
         printf '%s\n' ""
     fi
 
+    pipeline_status="success"
     printf '%s\n' "=== Pipeline complete ==="
 }
 
-main "$@"
+# Wrap main with log cleanup
+_run_main() {
+    local exit_code=0
+    main "$@" || exit_code=$?
+
+    if [[ $exit_code -eq 0 ]]; then
+        log_cleanup "success" "$AUDIT_DIR"
+    else
+        log_cleanup "failure" "$AUDIT_DIR"
+    fi
+    return $exit_code
+}
+
+_run_main "$@"

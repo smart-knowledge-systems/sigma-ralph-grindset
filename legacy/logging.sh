@@ -65,10 +65,64 @@ _log_timestamp() {
 }
 
 # ---------------------------------------------------------------------------
+# File logging — always writes debug-level to disk (./logs/.tmp/)
+# ---------------------------------------------------------------------------
+_LOG_FILE_FD=""
+_LOG_FILE_PATH=""
+_LOG_TMP_DIR=""
+
+# Initialize file logging. Call once at pipeline start.
+# Creates ./logs/.tmp/ and opens a log file for the run.
+# Args: $1 — base directory (typically AUDIT_DIR)
+log_init_file() {
+    local base_dir="${1:-.}"
+    _LOG_TMP_DIR="${base_dir}/logs/.tmp"
+    mkdir -p "$_LOG_TMP_DIR"
+    _LOG_FILE_PATH="${_LOG_TMP_DIR}/run-$(date +%Y%m%dT%H%M%S).log"
+    # Open file descriptor 7 for log writing
+    exec 7>>"$_LOG_FILE_PATH"
+    _LOG_FILE_FD=7
+}
+
+# Write a line to the log file (always at debug level, regardless of LOG_LEVEL).
+_log_to_file() {
+    local level_tag="$1"
+    shift
+    if [[ -n "$_LOG_FILE_FD" ]]; then
+        printf '[%s] %s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$level_tag" "$*" >&7
+    fi
+}
+
+# Clean up log directory based on pipeline outcome.
+# Args: $1 — "success" or "failure", $2 — base directory (typically AUDIT_DIR)
+log_cleanup() {
+    local status="${1:-failure}"
+    local base_dir="${2:-.}"
+
+    # Close file descriptor
+    if [[ -n "$_LOG_FILE_FD" ]]; then
+        exec 7>&- 2>/dev/null || true
+        _LOG_FILE_FD=""
+    fi
+
+    if [[ "$status" == "success" ]]; then
+        rm -rf "${base_dir}/logs/.tmp" 2>/dev/null || true
+    else
+        if [[ -d "${base_dir}/logs/.tmp" ]]; then
+            local failed_dir="${base_dir}/logs/failed-$(date +%Y%m%dT%H%M%S)"
+            mv "${base_dir}/logs/.tmp" "$failed_dir" 2>/dev/null || true
+            # Use stderr directly to avoid recursion
+            printf '[WARNING] Debug logs preserved at: %s\n' "$failed_dir" >&2
+        fi
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 log_debug() {
+    _log_to_file "[DEBUG]" "$*"
     local level
     level=$(_log_effective_level)
     [[ "$level" -gt 0 ]] && return
@@ -76,6 +130,7 @@ log_debug() {
 }
 
 log_info() {
+    _log_to_file "[INFO]" "$*"
     local level
     level=$(_log_effective_level)
     [[ "$level" -gt 1 ]] && return
@@ -83,6 +138,7 @@ log_info() {
 }
 
 log_warn() {
+    _log_to_file "[WARNING]" "$*"
     local level
     level=$(_log_effective_level)
     [[ "$level" -gt 2 ]] && return
@@ -90,5 +146,6 @@ log_warn() {
 }
 
 log_error() {
+    _log_to_file "[ERROR]" "$*"
     printf '%s%s[ERROR]%s %s\n' "$(_log_timestamp)" "$_LOG_COLOR_RED" "$_LOG_COLOR_RESET" "$*" >&2
 }

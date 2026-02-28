@@ -1,9 +1,20 @@
 node_modules/
+dist/
+.env
+.env.*
+!.env.example
+audit.conf
 audit.d*
 branch*.txt
 *.log
+logs/
 
 # BATS test helper libraries (cloned)
 test/test_helper/bats-support/
 test/test_helper/bats-assert/
 test/test_helper/bats-file/
+
+# Frontend UI build artifacts
+src/ui/dist/
+src/ui/dist-config/
+src/ui/node_modules/

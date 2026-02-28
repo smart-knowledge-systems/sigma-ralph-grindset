@@ -149,6 +149,11 @@ if [[ -z "$DIFF_MODE" ]]; then
     done <"$BRANCHES_FILE"
 fi
 
+# Initialize debug-to-disk logging (no-op if already initialized by run-all.sh)
+if [[ -z "${_LOG_FILE_FD:-}" ]]; then
+    log_init_file "$AUDIT_DIR"
+fi
+
 # Temp file tracking for cleanup on unexpected exit (global array)
 declare -a TEMP_FILES=()
 
@@ -467,20 +472,64 @@ process_branch() {
         error_msg="exit_code=${claude_exit_code}: $(sql_escape "$truncated_err")"
         db "UPDATE scans SET status='failed', error_message='$error_msg', completed_at=strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id=$scan_id;"
         log_error "Claude CLI failed for ${branch_label} (exit code ${claude_exit_code})"
+        printf '%s\n' "cli_exit_${claude_exit_code}" >"${AUDIT_DIR}/.last_error_type" 2>/dev/null || true
         return 1
     fi
 
-    # Parse JSON output (structured_output contains the schema-validated data)
-    local result_json
-    result_json=$(printf '%s\n' "$output" | jq -c '.[-1].structured_output' 2>/dev/null) || {
+    # Parse JSON output — multi-strategy parser to handle different Claude CLI output formats
+    local result_json=""
+    local parse_ok=""
+
+    # Strategy 1: output is already the structured JSON object with .issues
+    if printf '%s\n' "$output" | jq -e '.issues' &>/dev/null; then
+        result_json=$(printf '%s\n' "$output" | jq -c '.')
+        parse_ok=1
+    fi
+
+    # Strategy 2: array format, last element has .structured_output
+    if [[ -z "$parse_ok" ]]; then
+        result_json=$(printf '%s\n' "$output" | jq -c '.[-1].structured_output // empty' 2>/dev/null)
+        if [[ -n "$result_json" ]] && printf '%s\n' "$result_json" | jq -e '.issues' &>/dev/null; then
+            parse_ok=1
+        fi
+    fi
+
+    # Strategy 3: array format, last element has .result
+    if [[ -z "$parse_ok" ]]; then
+        result_json=$(printf '%s\n' "$output" | jq -c '.[-1].result // empty' 2>/dev/null)
+        if [[ -n "$result_json" ]] && printf '%s\n' "$result_json" | jq -e '.issues' &>/dev/null; then
+            parse_ok=1
+        fi
+    fi
+
+    # Strategy 4: array format, last element IS the result
+    if [[ -z "$parse_ok" ]]; then
+        result_json=$(printf '%s\n' "$output" | jq -c '.[-1] // empty' 2>/dev/null)
+        if [[ -n "$result_json" ]] && printf '%s\n' "$result_json" | jq -e '.issues' &>/dev/null; then
+            parse_ok=1
+        fi
+    fi
+
+    # Strategy 5: find first object in array that has .issues
+    if [[ -z "$parse_ok" ]] && printf '%s\n' "$output" | jq -e 'type == "array"' &>/dev/null; then
+        result_json=$(printf '%s\n' "$output" | jq -c '[.[] | select(.issues != null)] | .[0] // empty' 2>/dev/null)
+        if [[ -n "$result_json" ]] && printf '%s\n' "$result_json" | jq -e '.issues' &>/dev/null; then
+            parse_ok=1
+        fi
+    fi
+
+    if [[ -z "$parse_ok" ]]; then
         local truncated_raw
         truncated_raw=$(truncate_for_db "$output" 500)
         local escaped_raw
         escaped_raw=$(sql_escape "$truncated_raw")
         db "UPDATE scans SET status='failed', error_message='JSON parse error: $escaped_raw', completed_at=strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id=$scan_id;"
         log_error "Failed to parse JSON for ${branch_label}"
+        log_debug "Raw output type: $(printf '%s\n' "$output" | jq -r 'type' 2>/dev/null || printf 'not-json')"
+        log_debug "Raw output (first 2000 chars): ${output:0:2000}"
+        printf '%s\n' "json_parse_error" >"${AUDIT_DIR}/.last_error_type" 2>/dev/null || true
         return 1
-    }
+    fi
 
     # Insert issues into database
     local issue_count=0
@@ -578,6 +627,10 @@ process_all_branches() {
     RESULT_SUCCESS=0
     RESULT_FAIL=0
 
+    # Consecutive error tracking — abort early if same error repeats
+    local consecutive_errors=0
+    local last_error_type=""
+
     local branch is_flat clean_branch full_path
     for branch in "${AUDIT_BRANCHES[@]}"; do
         ((branch_index++)) || true
@@ -628,8 +681,22 @@ process_all_branches() {
             # Process as single batch
             if process_branch "$branch" "" "${files[@]}"; then
                 ((RESULT_SUCCESS++)) || true
+                consecutive_errors=0
+                last_error_type=""
             else
                 ((RESULT_FAIL++)) || true
+                local current_error
+                current_error=$(cat "${AUDIT_DIR}/.last_error_type" 2>/dev/null || printf 'unknown')
+                if [[ "$current_error" == "$last_error_type" ]]; then
+                    ((consecutive_errors++)) || true
+                else
+                    consecutive_errors=1
+                    last_error_type="$current_error"
+                fi
+                if [[ $consecutive_errors -ge 2 ]]; then
+                    log_error "Aborting: same error occurred $consecutive_errors times in a row: $last_error_type"
+                    break
+                fi
             fi
             loc_done=$((loc_done + total_loc))
             if progress_is_owner; then
@@ -688,8 +755,22 @@ process_all_branches() {
 
             if [[ -n "$branch_failed" ]]; then
                 ((RESULT_FAIL++)) || true
+                local current_error
+                current_error=$(cat "${AUDIT_DIR}/.last_error_type" 2>/dev/null || printf 'unknown')
+                if [[ "$current_error" == "$last_error_type" ]]; then
+                    ((consecutive_errors++)) || true
+                else
+                    consecutive_errors=1
+                    last_error_type="$current_error"
+                fi
+                if [[ $consecutive_errors -ge 2 ]]; then
+                    log_error "Aborting: same error occurred $consecutive_errors times in a row: $last_error_type"
+                    break
+                fi
             else
                 ((RESULT_SUCCESS++)) || true
+                consecutive_errors=0
+                last_error_type=""
             fi
         fi
 
