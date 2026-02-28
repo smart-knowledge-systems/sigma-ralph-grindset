@@ -197,7 +197,8 @@ const sideCol: CSSProperties = {};
 const logArea: CSSProperties = {
   marginTop: "auto",
   position: "sticky",
-  bottom: 0,
+  bottom: 16,
+  paddingBottom: 16,
 };
 
 const idleCard: CSSProperties = {

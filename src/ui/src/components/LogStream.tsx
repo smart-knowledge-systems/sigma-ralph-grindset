@@ -142,10 +142,9 @@ export default function LogStream({ logs }: Props) {
 
 const wrapper: CSSProperties = {
   background: "#2D2A23",
-  borderRadius: "12px 12px 0 0",
+  borderRadius: 12,
   overflow: "hidden",
   border: "1px solid #3D3930",
-  borderBottom: "none",
 };
 
 const header: CSSProperties = {

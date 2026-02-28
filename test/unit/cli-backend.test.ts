@@ -1,5 +1,9 @@
 import { describe, test, expect } from "bun:test";
-import { parseCliOutput, ParseError } from "../../src/audit/cli-backend";
+import {
+  parseCliOutput,
+  parseNarrativeIssues,
+  ParseError,
+} from "../../src/audit/cli-backend";
 
 describe("parseCliOutput", () => {
   test("structured_output envelope (primary path)", () => {
@@ -57,6 +61,85 @@ describe("parseCliOutput", () => {
     expect(result.issues).toEqual([]);
   });
 
+  test("CLI envelope with .result as object containing issues", () => {
+    const raw = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      result: {
+        issues: [
+          {
+            description: "d",
+            rule: "R3",
+            severity: "medium",
+            suggestion: "s",
+            policy: "p",
+            files: ["c.ts"],
+          },
+        ],
+      },
+    });
+    const result = parseCliOutput(raw);
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0].rule).toBe("R3");
+  });
+
+  test("CLI envelope with .result as string containing JSON", () => {
+    const issues = {
+      issues: [
+        {
+          description: "test issue",
+          rule: "R4",
+          severity: "low",
+          suggestion: "fix it",
+          policy: "p",
+          files: ["d.ts"],
+        },
+      ],
+    };
+    const raw = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: `Here are my findings:\n\n${JSON.stringify(issues)}`,
+    });
+    const result = parseCliOutput(raw);
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0].rule).toBe("R4");
+  });
+
+  test("CLI envelope with .result as string with JSON in code fence", () => {
+    const issues = {
+      issues: [
+        {
+          description: "fenced",
+          rule: "R5",
+          severity: "high",
+          suggestion: "s",
+          policy: "p",
+          files: ["e.ts"],
+        },
+      ],
+    };
+    const raw = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      result: `Audit complete:\n\n\`\`\`json\n${JSON.stringify(issues)}\n\`\`\``,
+    });
+    const result = parseCliOutput(raw);
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0].rule).toBe("R5");
+  });
+
+  test("array with .result as string containing JSON in last element", () => {
+    const issues = { issues: [] };
+    const raw = JSON.stringify([
+      { type: "text", text: "thinking..." },
+      { result: `No issues found.\n${JSON.stringify(issues)}` },
+    ]);
+    const result = parseCliOutput(raw);
+    expect(result.issues).toEqual([]);
+  });
+
   test("throws ParseError for invalid JSON", () => {
     expect(() => parseCliOutput("not json")).toThrow(ParseError);
   });
@@ -65,5 +148,100 @@ describe("parseCliOutput", () => {
     expect(() => parseCliOutput(JSON.stringify({ foo: "bar" }))).toThrow(
       ParseError,
     );
+  });
+
+  test("CLI envelope with narrative markdown issues (fallback parser)", () => {
+    const narrative = `I'll review the files.
+
+## Audit Results
+
+### Issue 1: Raw console.log bypasses logging library
+**Rule**: Use the Logging Library (Rule 1)
+**Severity**: medium
+**Policy**: logging-strategy
+**Files**: \`src/index.ts\`
+
+**Fix**: Replace console.log with log.info().
+
+---
+
+### Issue 2: Missing error structure
+**Rule**: Error Logging Structure (Rule 10)
+**Severity**: high
+**Policy**: logging-strategy
+**Files**: \`src/logging.ts\`, \`src/index.ts\`
+
+**Fix**: Add structured error fields.`;
+
+    const raw = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: narrative,
+    });
+    const result = parseCliOutput(raw);
+    expect(result.issues).toHaveLength(2);
+    expect(result.issues[0].rule).toBe("Use the Logging Library (Rule 1)");
+    expect(result.issues[0].severity).toBe("medium");
+    expect(result.issues[0].files).toEqual(["src/index.ts"]);
+    expect(result.issues[1].severity).toBe("high");
+    expect(result.issues[1].files).toEqual(["src/logging.ts", "src/index.ts"]);
+  });
+
+  test("throws ParseError for CLI envelope with no issues found", () => {
+    const raw = JSON.stringify({
+      type: "result",
+      result: "I reviewed the code and found no issues to report.",
+    });
+    expect(() => parseCliOutput(raw)).toThrow(ParseError);
+  });
+});
+
+describe("parseNarrativeIssues", () => {
+  test("parses standard markdown issue format", () => {
+    const text = `### Issue 1: Bad pattern
+**Rule**: Rule A
+**Severity**: low
+**Policy**: my-policy
+**Files**: \`a.ts\`
+
+Some suggestion text.`;
+
+    const issues = parseNarrativeIssues(text);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].description).toBe("Bad pattern");
+    expect(issues[0].rule).toBe("Rule A");
+    expect(issues[0].severity).toBe("low");
+    expect(issues[0].policy).toBe("my-policy");
+    expect(issues[0].files).toEqual(["a.ts"]);
+  });
+
+  test("parses multiple comma-separated files", () => {
+    const text = `### Issue 1: Multi-file issue
+**Rule**: R1
+**Severity**: high
+**Policy**: p
+**Files**: \`a.ts\`, \`b.ts\`, \`c.ts\`
+
+Fix it.`;
+
+    const issues = parseNarrativeIssues(text);
+    expect(issues[0].files).toEqual(["a.ts", "b.ts", "c.ts"]);
+  });
+
+  test("defaults severity to medium for unknown values", () => {
+    const text = `### Issue 1: Test
+**Rule**: R
+**Severity**: critical
+**Policy**: p
+**Files**: \`x.ts\``;
+
+    const issues = parseNarrativeIssues(text);
+    expect(issues[0].severity).toBe("medium");
+  });
+
+  test("returns empty array for non-issue text", () => {
+    const issues = parseNarrativeIssues("No issues found. Good job!");
+    expect(issues).toEqual([]);
   });
 });
