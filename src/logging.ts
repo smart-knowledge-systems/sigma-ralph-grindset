@@ -27,6 +27,7 @@ const RESET = "\x1b[0m";
 let logFilePath: string | null = null;
 let logTmpDir: string | null = null;
 let consoleLevel: number = LEVEL_NUM.info;
+let errorCount = 0;
 
 function timestamp(): string {
   return new Date().toISOString();
@@ -58,7 +59,7 @@ export function setLogLevel(level?: string): void {
 export function cleanupLogs(success: boolean, baseDir: string): string | null {
   if (!logTmpDir) return null;
 
-  if (success) {
+  if (success && errorCount === 0) {
     try {
       rmSync(logTmpDir, { recursive: true, force: true });
     } catch {
@@ -67,6 +68,13 @@ export function cleanupLogs(success: boolean, baseDir: string): string | null {
     logFilePath = null;
     logTmpDir = null;
     return null;
+  }
+
+  // Treat as failure if pipeline "succeeded" but errors were logged
+  if (success && errorCount > 0) {
+    log.warn(
+      `Pipeline reported success but ${errorCount} error(s) were logged — preserving logs`,
+    );
   }
 
   // On failure, move .tmp/ to failed-TIMESTAMP/
@@ -107,6 +115,8 @@ function writeToFile(level: string, msg: string, ts: string): void {
 function write(level: LogLevel, msg: string): void {
   // Capture timestamp once so the file log and event bus agree on timing
   const ts = timestamp();
+
+  if (level === "error") errorCount++;
 
   // Always write to file at debug level
   writeToFile(`[${level.toUpperCase()}]`, msg, ts);

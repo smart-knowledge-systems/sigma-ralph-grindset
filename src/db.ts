@@ -367,17 +367,19 @@ export function updateFixAttempt(
   config: AuditConfig,
   attemptId: number,
   status: string,
-  opts?: { checkOutput?: string; claudeOutput?: string },
+  opts?: { checkOutput?: string; claudeOutput?: string; errorMessage?: string },
 ): void {
   const d = getDb(config);
   d.prepare(
     `UPDATE fix_attempts SET status=?, completed_at=strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-     check_output=COALESCE(?, check_output), claude_output=COALESCE(?, claude_output)
+     check_output=COALESCE(?, check_output), claude_output=COALESCE(?, claude_output),
+     error_message=COALESCE(?, error_message)
      WHERE id=?`,
   ).run(
     status,
     opts?.checkOutput ?? null,
     opts?.claudeOutput ?? null,
+    opts?.errorMessage ?? null,
     attemptId,
   );
 }

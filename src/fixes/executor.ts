@@ -76,18 +76,30 @@ export async function fixBatch(
     });
 
     let claudeOutput = "";
+    let stderrText = "";
     if (!opts.interactive) {
       // Consume both streams to prevent buffer backpressure
-      const [stdoutText] = await Promise.all([
+      const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
       ]);
-      claudeOutput = stdoutText;
+      claudeOutput = stdout;
+      stderrText = stderr;
     }
     const exitCode = await proc.exited;
 
     if (exitCode !== 0) {
       log.error(`Claude CLI failed for ${batchLabel}: exit code ${exitCode}`);
+      if (stderrText.trim()) {
+        log.error(`  stderr: ${stderrText.trim().slice(0, 500)}`);
+      }
+      updateFixAttempt(config, attemptId, "failed", {
+        claudeOutput: claudeOutput.slice(0, 4000),
+        errorMessage: stderrText.slice(0, 4000),
+      });
+      updateIssueFixStatus(config, issueIds, "pending");
+      events.emit({ type: "fix:batch:complete", batchNum, success: false });
+      return false;
     }
 
     // Store truncated output
