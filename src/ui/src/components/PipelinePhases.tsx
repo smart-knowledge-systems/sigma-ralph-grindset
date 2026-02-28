@@ -1,7 +1,6 @@
 import { CSSProperties } from "react";
 
 interface Props {
-  phase: string;
   phaseStatuses: Record<string, "started" | "completed">;
   pipelineComplete: boolean;
   pipelineSuccess: boolean;

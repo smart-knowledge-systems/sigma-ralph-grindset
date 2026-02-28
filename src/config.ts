@@ -157,12 +157,15 @@ export function loadConfig(auditDir?: string): AuditConfig {
     auditModel: getStr("AUDIT_MODEL", "haiku"),
     fixModel: getStr("FIX_MODEL", "sonnet"),
     commitModel: getStr("COMMIT_MODEL", "haiku"),
-    defaultMode: getStr("DEFAULT_MODE", "api") as AuditMode,
+    defaultMode: ((): AuditMode => {
+      const raw = getStr("DEFAULT_MODE", "api");
+      if (raw === "cli" || raw === "api" || raw === "batch") return raw;
+      return "api";
+    })(),
     defaultDiff: getStr("DEFAULT_DIFF", "false") === "true",
     defaultDiffRef: getStr("DEFAULT_DIFF_REF", ""),
     defaultForceAll: getStr("DEFAULT_FORCE_ALL", "false") === "true",
     defaultDryRun: getStr("DEFAULT_DRY_RUN", "false") === "true",
-    defaultPerPolicy: getStr("DEFAULT_PER_POLICY", "false") === "true",
     defaultStdout: getStr("DEFAULT_STDOUT", "false") === "true",
     defaultInteractive: getStr("DEFAULT_INTERACTIVE", "false") === "true",
     defaultSkipCommits: getStr("DEFAULT_SKIP_COMMITS", "false") === "true",

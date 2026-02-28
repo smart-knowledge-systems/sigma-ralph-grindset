@@ -65,6 +65,10 @@ export type PipelineEvent =
       };
     }
   | {
+      type: "cost:estimate:aggregated";
+      estimate: AggregatedCostEstimate;
+    }
+  | {
       type: "cost:confirm-request";
       estimate: CostEstimate;
       requestId: string;
@@ -112,6 +116,20 @@ export interface CostEstimate {
   batchCost: number;
 }
 
+export interface AggregatedCostEstimate {
+  model: string;
+  branchCount: number;
+  policyCount: number;
+  totalRequests: number;
+  totalBatchApiCost: number;
+  totalNoCacheCost: number;
+  perPolicy: Array<{
+    policyName: string;
+    policyTokens: number;
+    batchApiCost: number;
+  }>;
+}
+
 export interface LogEntry {
   level: string;
   message: string;
@@ -128,6 +146,7 @@ export interface UIState {
   audits: Record<string, AuditState>;
   fix: FixState;
   costEstimate: CostEstimate | null;
+  costEstimateAggregated: AggregatedCostEstimate | null;
   costConfirmRequest: { estimate: CostEstimate; requestId: string } | null;
   logs: LogEntry[];
   startTime: string;

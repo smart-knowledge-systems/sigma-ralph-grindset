@@ -209,7 +209,10 @@ export function ensureFile(config: AuditConfig, path: string): number {
   const row = d.prepare(`SELECT id FROM files WHERE path=?`).get(path) as {
     id: number;
   } | null;
-  return row!.id;
+  if (!row) {
+    throw new Error(`Failed to insert or find file record for: ${path}`);
+  }
+  return row.id;
 }
 
 /** Link an issue to a file. */

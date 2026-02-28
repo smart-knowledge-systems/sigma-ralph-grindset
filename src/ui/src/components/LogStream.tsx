@@ -1,4 +1,11 @@
-import { CSSProperties, useEffect, useRef, useState, useCallback } from "react";
+import {
+  CSSProperties,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 
 interface LogEntry {
   level: string;
@@ -28,7 +35,10 @@ export default function LogStream({ logs }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isUserScrolling = useRef(false);
 
-  const filteredLogs = logs.filter((l) => filters.has(l.level));
+  const filteredLogs = useMemo(
+    () => logs.filter((l) => filters.has(l.level)),
+    [logs, filters],
+  );
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -47,7 +57,7 @@ export default function LogStream({ logs }: Props) {
     if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [filteredLogs.length, autoScroll]);
+  }, [filteredLogs, autoScroll]);
 
   const toggleFilter = (level: string) => {
     setFilters((prev) => {
@@ -112,8 +122,8 @@ export default function LogStream({ logs }: Props) {
           {filteredLogs.length === 0 && (
             <div style={emptyMsg}>No log entries yet.</div>
           )}
-          {filteredLogs.map((entry, i) => (
-            <div key={i} style={logLine}>
+          {filteredLogs.map((entry) => (
+            <div key={`${entry.timestamp}-${entry.message}`} style={logLine}>
               <span style={timestamp}>{entry.timestamp.slice(11, 19)}</span>
               <span
                 style={{

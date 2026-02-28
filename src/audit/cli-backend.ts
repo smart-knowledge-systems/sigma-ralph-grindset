@@ -127,6 +127,23 @@ export function parseCliOutput(raw: string): AuditResult {
   throw new ParseError("Cannot extract issues from CLI output", raw);
 }
 
+/** Validate that parsed issues have required fields and correct types. */
+function validateIssues(result: AuditResult): AuditResult {
+  const validSeverities = new Set(["high", "medium", "low"]);
+  const validated = result.issues.filter((issue) => {
+    if (typeof issue.description !== "string" || !issue.description) return false;
+    if (typeof issue.rule !== "string") return false;
+    if (!validSeverities.has(issue.severity)) {
+      issue.severity = "medium";
+    }
+    if (!Array.isArray(issue.files) || issue.files.length === 0) return false;
+    if (typeof issue.suggestion !== "string") issue.suggestion = "";
+    if (typeof issue.policy !== "string") issue.policy = "";
+    return true;
+  });
+  return { issues: validated };
+}
+
 /**
  * Parse narrative markdown audit output into structured issues.
  * Handles the format the model produces when --json-schema is ignored:
@@ -255,6 +272,7 @@ export async function auditViaCli(
 
   log.debug(`Spawning: claude --print --model ${config.auditModel}`);
 
+  const startTime = performance.now();
   const proc = Bun.spawn(args, {
     stdin: new Response(userPrompt),
     stdout: "pipe",
@@ -265,18 +283,21 @@ export async function auditViaCli(
   const stdout = await new Response(proc.stdout).text();
   const stderr = await new Response(proc.stderr).text();
   const exitCode = await proc.exited;
+  const durationMs = Math.round(performance.now() - startTime);
 
   if (exitCode !== 0) {
     const errorType = `cli_exit_${exitCode}`;
-    log.error(`Claude CLI failed (exit ${exitCode}): ${stderr.slice(0, 200)}`);
+    log.error(`Claude CLI failed (exit ${exitCode}, ${durationMs}ms): ${stderr.slice(0, 200)}`);
     throw Object.assign(new Error(`Claude CLI exit code ${exitCode}`), {
       errorType,
       stderr: stderr.slice(0, 500),
     });
   }
 
+  log.debug(`Claude CLI completed in ${durationMs}ms`);
+
   try {
-    const result = parseCliOutput(stdout);
+    const result = validateIssues(parseCliOutput(stdout));
     return { result };
   } catch (e) {
     const errorType = "json_parse_error";

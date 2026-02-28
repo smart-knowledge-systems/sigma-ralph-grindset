@@ -86,12 +86,20 @@ function getPoliciesForIssues(
 /** Count total pending issues with optional policy filter. */
 function countPendingIssues(
   config: AuditConfig,
-  policySqlFilter: string,
+  policyFilter?: string,
 ): number {
   const d = getDb(config);
+  if (policyFilter) {
+    const row = d
+      .prepare(
+        `SELECT COUNT(*) as cnt FROM issues i JOIN scans s ON i.scan_id = s.id WHERE i.fix_status = 'pending' AND s.policy = ?`,
+      )
+      .get(policyFilter) as { cnt: number };
+    return row.cnt;
+  }
   const row = d
     .prepare(
-      `SELECT COUNT(*) as cnt FROM issues i JOIN scans s ON i.scan_id = s.id WHERE i.fix_status = 'pending' ${policySqlFilter}`,
+      `SELECT COUNT(*) as cnt FROM issues i JOIN scans s ON i.scan_id = s.id WHERE i.fix_status = 'pending'`,
     )
     .get() as { cnt: number };
   return row.cnt;
@@ -141,13 +149,8 @@ export async function runFixes(
     setupGit(config);
   }
 
-  // Build SQL filter clause
-  const policySqlFilter = opts.policyFilter
-    ? `AND s.policy = '${opts.policyFilter.replace(/'/g, "''")}'`
-    : "";
-
   // Build LOC-based batches
-  const filesWithLoc = getFixFilesWithLoc(config, policySqlFilter);
+  const filesWithLoc = getFixFilesWithLoc(config, opts.policyFilter);
   if (filesWithLoc.length === 0) {
     log.info("No pending issues to fix.");
     return { fixed: 0, failed: 0 };
@@ -155,7 +158,7 @@ export async function runFixes(
 
   const batches = batchFilesByLoc(filesWithLoc, config.maxFixLoc);
   const totalBatches = batches.length;
-  const totalPending = countPendingIssues(config, policySqlFilter);
+  const totalPending = countPendingIssues(config, opts.policyFilter);
 
   events.emit({
     type: "fix:start",

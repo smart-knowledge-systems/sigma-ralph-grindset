@@ -2,10 +2,10 @@
 // Audit orchestrator — coordinates branch processing
 // ============================================================================
 
-import { execSync } from "child_process";
-import { existsSync, readdirSync } from "fs";
+import { spawnSync } from "child_process";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
-import type { AuditConfig, AuditMode, Branch } from "../types";
+import type { AuditConfig, AuditMode, Branch, CostEstimate, PerBranchCostEstimate } from "../types";
 import { log } from "../logging";
 import { events } from "../events";
 import { initDatabase, getCheckpointCommit } from "../db";
@@ -17,7 +17,7 @@ import {
   isExcludedPath,
 } from "../branches/scanner";
 import { processBranch } from "./process-branch";
-import { auditViaBatch } from "./api-backend";
+import { auditViaBatch, auditViaBatchPerBranch } from "./api-backend";
 import {
   insertScan,
   updateScanStatus,
@@ -33,11 +33,13 @@ import {
   formatActualCost,
   computeActualCost,
   estimateTokens,
+  estimatePerBranchCost,
+  formatPerBranchEstimate,
 } from "../pricing";
 import { buildSystemPrompt } from "./prompts";
 import { randomUUID } from "crypto";
 
-interface AuditOptions {
+export interface AuditOptions {
   policies: string[];
   forceAll: boolean;
   diffMode: boolean;
@@ -45,6 +47,7 @@ interface AuditOptions {
   mode: AuditMode;
   dryRun: boolean;
   maxLoc?: number;
+  costApproved?: boolean;
 }
 
 /** Discover active policies from policies/ directory. */
@@ -183,60 +186,12 @@ export async function runAudit(
       branchesWithFiles.push({ path: branch.path, files });
     }
 
-    // Cost estimation
-    const systemPrompt = buildSystemPrompt(config, policyNames);
-    const systemTokens = estimateTokens(systemPrompt.length);
-    const avgBranchChars =
-      branchesWithFiles.reduce((sum, b) => {
-        return sum + b.files.reduce((s, f) => s + (Bun.file(f).size ?? 0), 0);
-      }, 0) / Math.max(branchesWithFiles.length, 1);
-    const avgBranchTokens = estimateTokens(avgBranchChars);
-
-    const estimate = estimateCost(
-      config.auditModel,
-      branchesWithFiles.length,
-      systemTokens,
-      avgBranchTokens,
-      1500,
-    );
-
-    log.info(formatEstimate(estimate));
-    events.emit({
-      type: "cost:estimate",
-      estimate: {
-        model: estimate.model,
-        branchCount: estimate.branchCount,
-        noCacheCost: estimate.noCacheCost,
-        standardCost: estimate.standardApiCost,
-        batchCost: estimate.batchApiCost,
-      },
-    });
-
-    if (opts.dryRun) {
-      log.info("\n--dry-run: exiting without executing.");
-      return { processed: 0, succeeded: 0, failed: 0 };
-    }
-
-    // Cost confirmation gate
-    const requestId = randomUUID();
-    events.emit({
-      type: "cost:confirm-request",
-      estimate,
-      requestId,
-    });
-
-    const approved = await waitForConfirmation(requestId);
-    if (!approved) {
-      log.info("Audit cancelled by user.");
-      return { processed: 0, succeeded: 0, failed: 0 };
-    }
-
     // Validate API key before submitting
     if (!process.env.ANTHROPIC_API_KEY) {
       log.error("ANTHROPIC_API_KEY not set.");
       log.error("");
       log.error("  Option 1: Set your API key:");
-      log.error("    export ANTHROPIC_API_KEY=sk-ant-...");
+      log.error("    export ANTHROPIC_API_KEY=<your-api-key>");
       log.error("");
       log.error("  Option 2: Use the Claude CLI instead:");
       log.error("    bun audit --cli");
@@ -244,63 +199,261 @@ export async function runAudit(
       process.exit(1);
     }
 
-    // Submit batch
-    const useCaching = estimate.batchCachingEnabled;
-    let lastProgressMsg = "";
-    for await (const event of auditViaBatch(
-      branchesWithFiles,
-      policyNames,
-      config,
-      useCaching,
-    )) {
-      if (event.type === "complete") {
-        log.info(event.message!);
-        if (event.totalUsage) {
-          log.info(
-            formatActualCost(
-              config.auditModel,
-              event.totalUsage,
-              true,
-              estimate.batchApiCost,
-            ),
-          );
+    if (policyNames.length > 1) {
+      // ── Per-branch batching: one batch per branch, all policies in each ──
+      const perBranchEstimate = computePerBranchCostEstimate(
+        config,
+        policyNames,
+        { branchesWithFiles },
+      );
+
+      log.info(formatPerBranchEstimate(perBranchEstimate));
+      events.emit({
+        type: "cost:estimate",
+        estimate: {
+          model: perBranchEstimate.model,
+          branchCount: perBranchEstimate.branchCount,
+          noCacheCost: perBranchEstimate.totalNoCacheCost,
+          standardCost: perBranchEstimate.totalBatchApiCost,
+          batchCost: perBranchEstimate.totalBatchApiCost,
+        },
+      });
+
+      if (opts.dryRun) {
+        log.info("\n--dry-run: exiting without executing.");
+        return { processed: 0, succeeded: 0, failed: 0 };
+      }
+
+      // Cost confirmation gate (skip if pre-approved)
+      if (!opts.costApproved) {
+        const requestId = randomUUID();
+        const confirmEstimate: CostEstimate = {
+          model: perBranchEstimate.model,
+          branchCount: perBranchEstimate.branchCount,
+          totalInputTokens: 0,
+          totalOutputTokens: 0,
+          noCacheCost: perBranchEstimate.totalNoCacheCost,
+          cachingEnabled: true,
+          cachingSavings:
+            perBranchEstimate.totalNoCacheCost -
+            perBranchEstimate.totalBatchApiCost,
+          standardApiCost: perBranchEstimate.totalBatchApiCost,
+          batchApiCost: perBranchEstimate.totalBatchApiCost,
+          batchNoCacheCost: perBranchEstimate.totalNoCacheCost,
+          batchWithCacheCost: perBranchEstimate.totalBatchApiCost,
+          batchCachingEnabled: true,
+        };
+        events.emit({
+          type: "cost:confirm-request",
+          estimate: confirmEstimate,
+          requestId,
+        });
+
+        const approved = await waitForConfirmation(requestId);
+        if (!approved) {
+          log.info("Audit cancelled by user.");
+          return { processed: 0, succeeded: 0, failed: 0 };
         }
-      } else if (event.type === "progress") {
-        if (event.message === lastProgressMsg) {
-          log.debug(event.message!);
-        } else {
+      }
+
+      // Submit per-branch batches
+      let lastProgressMsg = "";
+      for await (const event of auditViaBatchPerBranch(
+        branchesWithFiles,
+        policyNames,
+        config,
+      )) {
+        if (event.type === "complete") {
           log.info(event.message!);
-          lastProgressMsg = event.message!;
-        }
-      } else if (event.type === "result" && event.result && event.branchPath) {
-        // Store results
-        const scanId = insertScan(config, event.branchPath, policyLabel, 0, 0);
-        let issueCount = 0;
-        for (const issue of event.result.issues) {
-          const issueId = insertIssue(
-            config,
-            scanId,
-            issue.description,
-            issue.rule,
-            issue.severity,
-            issue.suggestion,
-            issue.policy,
-          );
-          for (const rawFile of issue.files) {
-            const { path: cleanPath, lines } = parseFileRef(rawFile);
-            const fileId = ensureFile(config, cleanPath);
-            linkIssueFile(config, issueId, fileId, lines);
+          if (event.totalUsage) {
+            log.info(
+              formatActualCost(
+                config.auditModel,
+                event.totalUsage,
+                true,
+                perBranchEstimate.totalBatchApiCost,
+              ),
+            );
           }
-          issueCount++;
+        } else if (event.type === "progress") {
+          if (event.message === lastProgressMsg) {
+            log.debug(event.message!);
+          } else {
+            log.info(event.message!);
+            lastProgressMsg = event.message!;
+          }
+        } else if (
+          event.type === "result" &&
+          event.result &&
+          event.branchPath
+        ) {
+          const scanPolicyLabel = event.policyName ?? policyLabel;
+          const scanId = insertScan(
+            config,
+            event.branchPath,
+            scanPolicyLabel,
+            0,
+            0,
+          );
+          let issueCount = 0;
+          for (const issue of event.result.issues) {
+            const issueId = insertIssue(
+              config,
+              scanId,
+              issue.description,
+              issue.rule,
+              issue.severity,
+              issue.suggestion,
+              issue.policy,
+            );
+            for (const rawFile of issue.files) {
+              const { path: cleanPath, lines } = parseFileRef(rawFile);
+              const fileId = ensureFile(config, cleanPath);
+              linkIssueFile(config, issueId, fileId, lines);
+            }
+            issueCount++;
+          }
+          updateScanStatus(config, scanId, "completed", { issueCount });
+          if (event.usage) {
+            const cost = computeActualCost(
+              config.auditModel,
+              event.usage,
+              true,
+            );
+            updateScanUsage(config, scanId, event.usage, cost);
+          }
+          log.info(
+            `  ${event.branchPath}/${scanPolicyLabel}: ${issueCount} issues`,
+          );
+          processed++;
+          succeeded++;
         }
-        updateScanStatus(config, scanId, "completed", { issueCount });
-        if (event.usage) {
-          const cost = computeActualCost(config.auditModel, event.usage, true);
-          updateScanUsage(config, scanId, event.usage, cost, event.requestId);
+      }
+    } else {
+      // ── Single policy batch: existing combined batch ──
+      const systemPrompt = buildSystemPrompt(config, policyNames);
+      const systemTokens = estimateTokens(systemPrompt.length);
+      const avgBranchChars =
+        branchesWithFiles.reduce((sum, b) => {
+          return (
+            sum + b.files.reduce((s, f) => s + (Bun.file(f).size ?? 0), 0)
+          );
+        }, 0) / Math.max(branchesWithFiles.length, 1);
+      const avgBranchTokens = estimateTokens(avgBranchChars);
+
+      const estimate = estimateCost(
+        config.auditModel,
+        branchesWithFiles.length,
+        systemTokens,
+        avgBranchTokens,
+        1500,
+      );
+
+      log.info(formatEstimate(estimate));
+      events.emit({
+        type: "cost:estimate",
+        estimate: {
+          model: estimate.model,
+          branchCount: estimate.branchCount,
+          noCacheCost: estimate.noCacheCost,
+          standardCost: estimate.standardApiCost,
+          batchCost: estimate.batchApiCost,
+        },
+      });
+
+      if (opts.dryRun) {
+        log.info("\n--dry-run: exiting without executing.");
+        return { processed: 0, succeeded: 0, failed: 0 };
+      }
+
+      // Cost confirmation gate (skip if pre-approved)
+      if (!opts.costApproved) {
+        const requestId = randomUUID();
+        events.emit({
+          type: "cost:confirm-request",
+          estimate,
+          requestId,
+        });
+
+        const approved = await waitForConfirmation(requestId);
+        if (!approved) {
+          log.info("Audit cancelled by user.");
+          return { processed: 0, succeeded: 0, failed: 0 };
         }
-        log.info(`  ${event.branchPath}: ${issueCount} issues`);
-        processed++;
-        succeeded++;
+      }
+
+      // Submit batch
+      const useCaching = estimate.batchCachingEnabled;
+      let lastProgressMsg = "";
+      for await (const event of auditViaBatch(
+        branchesWithFiles,
+        policyNames,
+        config,
+        useCaching,
+      )) {
+        if (event.type === "complete") {
+          log.info(event.message!);
+          if (event.totalUsage) {
+            log.info(
+              formatActualCost(
+                config.auditModel,
+                event.totalUsage,
+                true,
+                estimate.batchApiCost,
+              ),
+            );
+          }
+        } else if (event.type === "progress") {
+          if (event.message === lastProgressMsg) {
+            log.debug(event.message!);
+          } else {
+            log.info(event.message!);
+            lastProgressMsg = event.message!;
+          }
+        } else if (
+          event.type === "result" &&
+          event.result &&
+          event.branchPath
+        ) {
+          // Store results
+          const scanId = insertScan(
+            config,
+            event.branchPath,
+            policyLabel,
+            0,
+            0,
+          );
+          let issueCount = 0;
+          for (const issue of event.result.issues) {
+            const issueId = insertIssue(
+              config,
+              scanId,
+              issue.description,
+              issue.rule,
+              issue.severity,
+              issue.suggestion,
+              issue.policy,
+            );
+            for (const rawFile of issue.files) {
+              const { path: cleanPath, lines } = parseFileRef(rawFile);
+              const fileId = ensureFile(config, cleanPath);
+              linkIssueFile(config, issueId, fileId, lines);
+            }
+            issueCount++;
+          }
+          updateScanStatus(config, scanId, "completed", { issueCount });
+          if (event.usage) {
+            const cost = computeActualCost(
+              config.auditModel,
+              event.usage,
+              true,
+            );
+            updateScanUsage(config, scanId, event.usage, cost, event.requestId);
+          }
+          log.info(`  ${event.branchPath}: ${issueCount} issues`);
+          processed++;
+          succeeded++;
+        }
       }
     }
   } else {
@@ -473,10 +626,16 @@ function filterBranches(
   // Get changed files since checkpoint
   let changedFiles: string;
   try {
-    changedFiles = execSync(
-      `git -C ${config.projectRoot} diff --name-only ${checkpoint}...HEAD`,
+    const result = spawnSync(
+      "git",
+      ["-C", config.projectRoot, "diff", "--name-only", `${checkpoint}...HEAD`],
       { encoding: "utf-8" },
     );
+    if (result.status !== 0) {
+      log.info("Mode: full audit (checkpoint commit not in history)");
+      return branches;
+    }
+    changedFiles = result.stdout;
   } catch {
     log.info("Mode: full audit (checkpoint commit not in history)");
     return branches;
@@ -503,7 +662,7 @@ function filterBranches(
 }
 
 /** Wait for user confirmation via stdin or browser event bus. */
-async function waitForConfirmation(requestId: string): Promise<boolean> {
+export async function waitForConfirmation(requestId: string): Promise<boolean> {
   return new Promise((resolve) => {
     let resolved = false;
     const cleanup = () => {
@@ -565,4 +724,62 @@ function batchFilesForAudit(files: string[], maxLoc: number): string[][] {
 
   if (current.length > 0) batches.push(current);
   return batches;
+}
+
+/**
+ * Compute a per-branch cost estimate without executing the audit.
+ * Loads branches/files if not provided, reads policy text for token counts.
+ */
+export function computePerBranchCostEstimate(
+  config: AuditConfig,
+  policyNames: string[],
+  preloaded?: { branchesWithFiles: Array<{ path: string; files: string[] }> },
+): PerBranchCostEstimate {
+  // Load branches/files if not pre-provided
+  const branchesWithFiles =
+    preloaded?.branchesWithFiles ??
+    (() => {
+      const branches = loadBranches(config);
+      const result: Array<{ path: string; files: string[] }> = [];
+      for (const branch of branches) {
+        const fullPath = resolve(config.projectRoot, branch.path);
+        if (!existsSync(fullPath)) continue;
+        const files = findSourceFiles(fullPath, branch.isFlat, config);
+        if (files.length === 0) continue;
+        result.push({ path: branch.path, files });
+      }
+      return result;
+    })();
+
+  // Compute average branch tokens
+  const avgBranchChars =
+    branchesWithFiles.reduce((sum, b) => {
+      return sum + b.files.reduce((s, f) => s + (Bun.file(f).size ?? 0), 0);
+    }, 0) / Math.max(branchesWithFiles.length, 1);
+  const avgBranchTokens = estimateTokens(avgBranchChars);
+
+  // Instruction tokens (shared audit instructions without policy text)
+  const instructionTokens = estimateTokens(
+    buildSystemPrompt(config, [policyNames[0]!]).length,
+  );
+
+  // Per-policy token counts from policy files
+  const policyTokensList = policyNames.map((name) => {
+    const policyFile = resolve(config.policiesDir, name, "POLICY.md");
+    let tokens = 0;
+    if (existsSync(policyFile)) {
+      const content = readFileSync(policyFile, "utf-8");
+      tokens = estimateTokens(content.length);
+    }
+    return { name, tokens };
+  });
+
+  return estimatePerBranchCost(
+    config.auditModel,
+    branchesWithFiles.length,
+    avgBranchTokens,
+    instructionTokens,
+    policyTokensList,
+    1500,
+  );
 }

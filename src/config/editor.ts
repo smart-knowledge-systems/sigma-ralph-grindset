@@ -140,14 +140,6 @@ export const CONFIG_FIELDS: ConfigField[] = [
     section: "defaults",
   },
   {
-    key: "DEFAULT_PER_POLICY",
-    label: "Per-policy",
-    type: "boolean",
-    default: false,
-    description: "--per-policy: run policies separately",
-    section: "defaults",
-  },
-  {
     key: "DEFAULT_STDOUT",
     label: "Stdout only",
     type: "boolean",
@@ -246,7 +238,7 @@ export function validateField(
     case "number":
       if (typeof value !== "number" || isNaN(value))
         return `${field.label} must be a number`;
-      if (value < 0) return `${field.label} must be positive`;
+      if (value <= 0) return `${field.label} must be a positive number`;
       break;
     case "boolean":
       if (typeof value !== "boolean") return `${field.label} must be a boolean`;

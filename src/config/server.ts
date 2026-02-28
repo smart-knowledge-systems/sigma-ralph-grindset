@@ -2,8 +2,8 @@
 // Browser config editor backend — Bun.serve with REST API
 // ============================================================================
 
-import { resolve } from "path";
-import { existsSync } from "fs";
+import { resolve, normalize } from "path";
+import { existsSync, realpathSync } from "fs";
 import {
   CONFIG_FIELDS,
   readConfig,
@@ -11,6 +11,7 @@ import {
   validateField,
   type ConfigValues,
 } from "./editor";
+import { log } from "../logging";
 
 export function startConfigServer(auditDir: string): {
   port: number;
@@ -23,6 +24,7 @@ export function startConfigServer(auditDir: string): {
     routes: {
       "/api/config": {
         GET() {
+          log.debug("Config server: reading configuration");
           const values = readConfig(auditDir);
           return Response.json(
             { fields: CONFIG_FIELDS, values },
@@ -30,11 +32,21 @@ export function startConfigServer(auditDir: string): {
           );
         },
         async PUT(req: Request) {
-          const body = (await req.json()) as ConfigValues;
+          const body = await req.json();
+          if (!body || typeof body !== "object" || Array.isArray(body)) {
+            return Response.json(
+              { errors: { _: "Request body must be a JSON object" } },
+              {
+                status: 400,
+                headers: { "Access-Control-Allow-Origin": "*" },
+              },
+            );
+          }
+          const values = body as ConfigValues;
           const errors: Record<string, string> = {};
 
           for (const field of CONFIG_FIELDS) {
-            const val = body[field.key];
+            const val = values[field.key];
             if (val === undefined) continue;
             const err = validateField(field, val);
             if (err) errors[field.key] = err;
@@ -50,7 +62,8 @@ export function startConfigServer(auditDir: string): {
             );
           }
 
-          writeConfig(auditDir, body);
+          writeConfig(auditDir, values);
+          log.info("Config server: configuration updated");
           return Response.json(
             { ok: true },
             { headers: { "Access-Control-Allow-Origin": "*" } },
@@ -80,8 +93,11 @@ export function startConfigServer(auditDir: string): {
 
       // Serve static files from dist-config
       if (filePath.startsWith("/assets/")) {
-        const assetPath = resolve(distDir, filePath.slice(1));
-        if (existsSync(assetPath)) {
+        const assetPath = resolve(distDir, normalize(filePath.slice(1)));
+        if (
+          existsSync(assetPath) &&
+          realpathSync(assetPath).startsWith(realpathSync(distDir) + "/")
+        ) {
           return new Response(Bun.file(assetPath));
         }
       }

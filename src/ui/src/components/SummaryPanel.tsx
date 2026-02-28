@@ -1,10 +1,16 @@
-import { CSSProperties, useEffect, useState } from "react";
-import type { AuditState, FixState, CostEstimate } from "../types";
+import { CSSProperties, useEffect, useMemo, useState } from "react";
+import type {
+  AuditState,
+  FixState,
+  CostEstimate,
+  AggregatedCostEstimate,
+} from "../types";
 
 interface Props {
   audits: Record<string, AuditState>;
   fix: FixState;
   costEstimate: CostEstimate | null;
+  costEstimateAggregated?: AggregatedCostEstimate | null;
   startTime: string;
   pipelineComplete: boolean;
   pipelineSuccess: boolean;
@@ -21,6 +27,7 @@ export default function SummaryPanel({
   audits,
   fix,
   costEstimate,
+  costEstimateAggregated,
   startTime,
   pipelineComplete,
   pipelineSuccess,
@@ -38,17 +45,23 @@ export default function SummaryPanel({
     return () => clearInterval(id);
   }, [startTime, pipelineComplete]);
 
-  // Aggregate stats
-  let totalIssues = 0;
-  let totalBranches = 0;
-  let failedBranches = 0;
-  for (const audit of Object.values(audits)) {
-    totalBranches += Object.keys(audit.branches).length;
-    failedBranches += audit.failed;
-    for (const branch of Object.values(audit.branches)) {
-      totalIssues += branch.issueCount;
+  const { totalIssues, totalBranches, failedBranches } = useMemo(() => {
+    let issues = 0;
+    let branches = 0;
+    let failed = 0;
+    for (const audit of Object.values(audits)) {
+      branches += Object.keys(audit.branches).length;
+      failed += audit.failed;
+      for (const branch of Object.values(audit.branches)) {
+        issues += branch.issueCount;
+      }
     }
-  }
+    return { totalIssues: issues, totalBranches: branches, failedBranches: failed };
+  }, [audits]);
+
+  const showAggregated =
+    costEstimateAggregated &&
+    costEstimateAggregated.perPolicy.length > 0;
 
   return (
     <div style={panel}>
@@ -109,8 +122,36 @@ export default function SummaryPanel({
         </div>
       )}
 
-      {/* Cost Estimate */}
-      {costEstimate && (
+      {/* Cost Estimate — aggregated per-policy breakdown */}
+      {showAggregated && (
+        <div style={{ ...statCard, borderColor: "#FFD90F" }}>
+          <div style={statCardTitle}>Cost Estimate (Batch API)</div>
+          {costEstimateAggregated.perPolicy.map((p) => (
+            <div key={p.policyName} style={costRow}>
+              <span style={policyNameStyle}>{p.policyName}</span>
+              <span style={costValue}>${p.batchApiCost.toFixed(2)}</span>
+            </div>
+          ))}
+          <div style={costSeparator} />
+          <div style={costRow}>
+            <span style={{ ...costLabel, color: "#2A9D8F", fontWeight: 600 }}>
+              Total
+            </span>
+            <span style={costValue}>
+              ${costEstimateAggregated.totalBatchApiCost.toFixed(2)}
+            </span>
+          </div>
+          <div style={subStats}>
+            <span>
+              {costEstimateAggregated.model} /{" "}
+              {costEstimateAggregated.branchCount} branches
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Cost Estimate — single estimate fallback */}
+      {!showAggregated && costEstimate && (
         <div style={{ ...statCard, borderColor: "#FFD90F" }}>
           <div style={statCardTitle}>Cost Estimate (Batch API)</div>
           <div style={costRow}>
@@ -259,9 +300,22 @@ const costLabel: CSSProperties = {
   color: "#5C5545",
 };
 
+const policyNameStyle: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  fontFamily: "'JetBrains Mono', monospace",
+  color: "#5C5545",
+};
+
 const costValue: CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: 15,
   fontWeight: 700,
   color: "#3D3D3D",
+};
+
+const costSeparator: CSSProperties = {
+  height: 1,
+  background: "#EDE5CC",
+  margin: "4px 0",
 };

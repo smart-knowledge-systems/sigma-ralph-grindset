@@ -10,6 +10,7 @@ import {
   writeConfig,
   type ConfigField,
 } from "./editor";
+import { log } from "../logging";
 
 function createRl() {
   return createInterface({
@@ -200,10 +201,10 @@ export async function runCliConfig(auditDir: string): Promise<void> {
   rl.close();
 
   if (confirm.toLowerCase() === "n" || confirm.toLowerCase() === "no") {
-    console.log("Cancelled.");
+    log.info("Configuration change cancelled.");
     return;
   }
 
   writeConfig(auditDir, values);
-  console.log("Configuration saved.");
+  log.info("Configuration saved to audit.conf.");
 }

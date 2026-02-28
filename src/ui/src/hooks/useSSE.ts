@@ -4,6 +4,34 @@ import { useEffect, useReducer, useRef } from "react";
 import type { PipelineEvent, UIState } from "../types";
 import { createInitialState, reducer } from "../state";
 
+const VALID_EVENT_TYPES = new Set([
+  "connected",
+  "pipeline:start",
+  "pipeline:phase",
+  "pipeline:complete",
+  "audit:start",
+  "audit:branch:start",
+  "audit:branch:complete",
+  "audit:branch:fail",
+  "audit:complete",
+  "fix:start",
+  "fix:batch:start",
+  "fix:batch:attempt",
+  "fix:batch:check",
+  "fix:batch:complete",
+  "fix:complete",
+  "cost:estimate",
+  "cost:estimate:aggregated",
+  "cost:confirm-request",
+  "log",
+]);
+
+function isValidEvent(data: unknown): data is PipelineEvent {
+  if (data == null || typeof data !== "object") return false;
+  const obj = data as Record<string, unknown>;
+  return typeof obj.type === "string" && VALID_EVENT_TYPES.has(obj.type);
+}
+
 export function useSSE(): UIState {
   const [state, dispatch] = useReducer(reducer, null, createInitialState);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -11,12 +39,16 @@ export function useSSE(): UIState {
   useEffect(() => {
     let eventSource: EventSource | null = null;
     let mounted = true;
+    const abortController = new AbortController();
 
     async function hydrate() {
       try {
-        const res = await fetch("/api/state");
-        if (!res.ok) return;
+        const res = await fetch("/api/state", {
+          signal: abortController.signal,
+        });
+        if (!res.ok || !mounted) return;
         const snapshot = await res.json();
+        if (!mounted) return;
 
         // Replay snapshot as synthetic events
         if (snapshot.phase !== "idle") {
@@ -139,6 +171,14 @@ export function useSSE(): UIState {
           dispatch({ type: "cost:estimate", estimate: snapshot.costEstimate });
         }
 
+        // Hydrate aggregated cost estimate
+        if (snapshot.costEstimateAggregated) {
+          dispatch({
+            type: "cost:estimate:aggregated",
+            estimate: snapshot.costEstimateAggregated,
+          });
+        }
+
         // Hydrate cost confirm request
         if (snapshot.costConfirmRequest) {
           dispatch({
@@ -152,8 +192,9 @@ export function useSSE(): UIState {
         for (const log of snapshot.logs ?? []) {
           dispatch({ type: "log", ...log });
         }
-      } catch {
-        // ignore hydration errors
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.warn("SSE hydration failed:", err);
       }
     }
 
@@ -163,16 +204,21 @@ export function useSSE(): UIState {
 
       eventSource.onmessage = (e) => {
         try {
-          const event: PipelineEvent = JSON.parse(e.data);
-          dispatch(event);
-        } catch {
-          // ignore parse errors
+          const parsed: unknown = JSON.parse(e.data);
+          if (!isValidEvent(parsed)) {
+            console.warn("SSE received unknown event type:", parsed);
+            return;
+          }
+          dispatch(parsed);
+        } catch (err) {
+          console.warn("SSE parse error:", err);
         }
       };
 
       eventSource.onerror = () => {
         eventSource?.close();
         if (mounted) {
+          if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
           reconnectTimer.current = setTimeout(connect, 2000);
         }
       };
@@ -182,6 +228,7 @@ export function useSSE(): UIState {
 
     return () => {
       mounted = false;
+      abortController.abort();
       eventSource?.close();
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);

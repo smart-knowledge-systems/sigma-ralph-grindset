@@ -1,53 +1,115 @@
 import { CSSProperties, useState } from "react";
-import type { CostEstimate } from "../types";
+import type { CostEstimate, AggregatedCostEstimate } from "../types";
 
 interface Props {
   estimate: CostEstimate;
   requestId: string;
   onDismiss: () => void;
+  aggregated?: AggregatedCostEstimate;
 }
 
 export default function CostConfirmation({
   estimate,
   requestId,
   onDismiss,
+  aggregated,
 }: Props) {
   const [waiting, setWaiting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function respond(approved: boolean) {
     if (approved) setWaiting(true);
+    setError(null);
     try {
-      await fetch("/api/confirm", {
+      const res = await fetch("/api/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ approved, requestId }),
       });
-      if (!approved) onDismiss();
+      if (!res.ok) {
+        setWaiting(false);
+        setError("Server error. Please try again.");
+        return;
+      }
+      if (approved) {
+        setWaiting(false);
+        onDismiss();
+      } else {
+        onDismiss();
+      }
     } catch {
       setWaiting(false);
+      setError("Network error. Please try again.");
     }
   }
 
+  const showAggregated = aggregated && aggregated.perPolicy.length > 0;
+
   return (
     <div style={card}>
-      <div style={titleStyle}>CONFIRM COST</div>
+      <div style={titleStyle}>
+        {showAggregated
+          ? `CONFIRM COST \u2014 ${aggregated.perPolicy.length} POLICIES`
+          : "CONFIRM COST"}
+      </div>
 
       <div style={table}>
-        <div style={costRow}>
-          <span style={costLabel}>Batch API</span>
-          <span style={costValuePrimary}>${estimate.batchCost.toFixed(2)}</span>
-        </div>
-        <div style={costRow}>
-          <span style={costLabelMuted}>Without caching</span>
-          <span style={costValueMuted}>${estimate.noCacheCost.toFixed(2)}</span>
-        </div>
+        {showAggregated ? (
+          <>
+            {aggregated.perPolicy.map((p) => (
+              <div key={p.policyName} style={costRow}>
+                <span style={policyLabel}>
+                  <span style={policyName}>{p.policyName}</span>
+                </span>
+                <span style={costValuePrimary}>
+                  ${p.batchApiCost.toFixed(2)}
+                </span>
+              </div>
+            ))}
+            <div style={separator} />
+            <div style={costRow}>
+              <span style={costLabel}>Total (Batch API)</span>
+              <span style={costValuePrimary}>
+                ${aggregated.totalBatchApiCost.toFixed(2)}
+              </span>
+            </div>
+            {aggregated.totalNoCacheCost > 0 && (
+              <div style={costRow}>
+                <span style={costLabelMuted}>Without caching</span>
+                <span style={costValueMuted}>
+                  ${aggregated.totalNoCacheCost.toFixed(2)}
+                </span>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div style={costRow}>
+              <span style={costLabel}>Batch API</span>
+              <span style={costValuePrimary}>
+                ${estimate.batchCost.toFixed(2)}
+              </span>
+            </div>
+            <div style={costRow}>
+              <span style={costLabelMuted}>Without caching</span>
+              <span style={costValueMuted}>
+                ${estimate.noCacheCost.toFixed(2)}
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
       <div style={subStats}>
-        <span>{estimate.model}</span>
-        <span style={dot}>·</span>
-        <span>{estimate.branchCount} branches</span>
+        <span>{showAggregated ? aggregated.model : estimate.model}</span>
+        <span style={dot}>&middot;</span>
+        <span>
+          {showAggregated ? aggregated.branchCount : estimate.branchCount}{" "}
+          branches
+        </span>
       </div>
+
+      {error && <div style={errorStyle}>{error}</div>}
 
       <div style={buttonRow}>
         <button
@@ -108,6 +170,19 @@ const costLabel: CSSProperties = {
   color: "#2A9D8F",
 };
 
+const policyLabel: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+};
+
+const policyName: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  fontFamily: "'JetBrains Mono', monospace",
+  color: "#5C5545",
+};
+
 const costValuePrimary: CSSProperties = {
   fontSize: 15,
   fontWeight: 700,
@@ -126,6 +201,12 @@ const costValueMuted: CSSProperties = {
   color: "#B8A882",
 };
 
+const separator: CSSProperties = {
+  height: 1,
+  background: "#EDE5CC",
+  margin: "4px 0",
+};
+
 const subStats: CSSProperties = {
   fontSize: 11,
   color: "#8C8370",
@@ -136,6 +217,13 @@ const subStats: CSSProperties = {
 
 const dot: CSSProperties = {
   color: "#D4C9A8",
+};
+
+const errorStyle: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#D63333",
+  marginBottom: 8,
 };
 
 const buttonRow: CSSProperties = {

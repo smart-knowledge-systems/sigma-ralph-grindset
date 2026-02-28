@@ -1,4 +1,4 @@
-import { CSSProperties } from "react";
+import { CSSProperties, useCallback } from "react";
 import { useSSE } from "./hooks/useSSE";
 import PipelinePhases from "./components/PipelinePhases";
 import AuditProgress from "./components/AuditProgress";
@@ -6,21 +6,26 @@ import FixProgress from "./components/FixProgress";
 import CostConfirmation from "./components/CostConfirmation";
 import SummaryPanel from "./components/SummaryPanel";
 import LogStream from "./components/LogStream";
+import {
+  brandRow as sharedBrandRow,
+  brandMark as sharedBrandMark,
+  brandTitle as sharedBrandTitle,
+  brandSub as sharedBrandSub,
+} from "./components/styles";
 
 export default function App() {
   const state = useSSE();
 
-  const dismissConfirm = () => {
-    // No-op — the state will be cleared when the pipeline proceeds
-  };
+  const dismissConfirm = useCallback(() => {
+    // Confirmation state is cleared server-side when pipeline proceeds
+  }, []);
 
+  const auditCount = Object.keys(state.audits).length;
   const showAudit =
     state.phase === "audit" ||
     state.phase === "pipeline" ||
-    (state.phase === "idle" && Object.keys(state.audits).length > 0) ||
-    (state.phase === "done" &&
-      Object.keys(state.audits).length > 0 &&
-      state.fix.totalBatches === 0);
+    (state.phase === "idle" && auditCount > 0) ||
+    (state.phase === "done" && auditCount > 0 && state.fix.totalBatches === 0);
 
   const showFix =
     state.phase === "fix" ||
@@ -50,7 +55,6 @@ export default function App() {
 
       {/* Pipeline Stepper */}
       <PipelinePhases
-        phase={state.phase}
         phaseStatuses={state.phaseStatuses}
         pipelineComplete={state.pipelineComplete}
         pipelineSuccess={state.pipelineSuccess}
@@ -65,6 +69,7 @@ export default function App() {
               estimate={state.costConfirmRequest.estimate}
               requestId={state.costConfirmRequest.requestId}
               onDismiss={dismissConfirm}
+              aggregated={state.costEstimateAggregated ?? undefined}
             />
           )}
           {showAudit && <AuditProgress audits={state.audits} />}
@@ -90,6 +95,7 @@ export default function App() {
             audits={state.audits}
             fix={state.fix}
             costEstimate={state.costEstimate}
+            costEstimateAggregated={state.costEstimateAggregated}
             startTime={state.startTime}
             pipelineComplete={state.pipelineComplete}
             pipelineSuccess={state.pipelineSuccess}
@@ -121,43 +127,10 @@ const header: CSSProperties = {
   padding: "20px 0 8px",
 };
 
-const brandRow: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 12,
-};
-
-const brandMark: CSSProperties = {
-  width: 40,
-  height: 40,
-  borderRadius: 10,
-  background: "linear-gradient(135deg, #FFD90F 0%, #F5C800 100%)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontWeight: 800,
-  fontSize: 22,
-  color: "#3D3D3D",
-  boxShadow: "0 2px 8px rgba(255, 217, 15, 0.3)",
-};
-
-const brandTitle: CSSProperties = {
-  margin: 0,
-  fontSize: 22,
-  fontWeight: 800,
-  color: "#3D3D3D",
-  letterSpacing: 1.5,
-  lineHeight: 1,
-};
-
-const brandSub: CSSProperties = {
-  margin: 0,
-  fontSize: 11,
-  fontWeight: 600,
-  color: "#8C8370",
-  letterSpacing: 0.5,
-  lineHeight: 1.3,
-};
+const brandRow = sharedBrandRow;
+const brandMark = sharedBrandMark;
+const brandTitle = sharedBrandTitle;
+const brandSub = sharedBrandSub;
 
 const connBadge: CSSProperties = {
   display: "flex",

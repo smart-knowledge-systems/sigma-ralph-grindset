@@ -2,7 +2,7 @@
 // Model-aware pricing estimation for audit runs
 // ============================================================================
 
-import type { ModelPricing, CostEstimate } from "./types";
+import type { ModelPricing, CostEstimate, PerBranchCostEstimate } from "./types";
 
 /** Pricing table: $ per million tokens */
 const PRICING: Record<string, ModelPricing> = {
@@ -238,6 +238,119 @@ export function formatEstimate(est: CostEstimate): string {
   lines.push("");
   lines.push("  Tip: To audit without an API key, use: bun audit --cli");
   lines.push("       (requires `claude` CLI installed, uses claude -p)");
+
+  return lines.join("\n");
+}
+
+/**
+ * Compute a per-branch cost estimate where each branch is audited against
+ * multiple policies. The branch source code is cached across policy requests.
+ *
+ * Per branch: 1 cache_write + (numPolicies-1) cache_reads of (instructions + branch_code)
+ * Per request: policy_tokens at batch_input_rate + output_tokens at batch_output_rate
+ */
+export function estimatePerBranchCost(
+  model: string,
+  branchCount: number,
+  avgBranchTokens: number,
+  instructionTokens: number,
+  policyTokensList: Array<{ name: string; tokens: number }>,
+  outputTokens: number,
+): PerBranchCostEstimate {
+  const pricing = getModelPricing(model);
+  const resolved = resolveModelId(model);
+  const numPolicies = policyTokensList.length;
+  const totalRequests = branchCount * numPolicies;
+
+  // Cached block = instructions + branch source code
+  const cachedBlockTokens = instructionTokens + avgBranchTokens;
+
+  // Per branch: 1 cache write + (numPolicies - 1) cache reads
+  const perBranchCacheWriteCost =
+    (cachedBlockTokens * pricing.cacheWrite) / 1_000_000;
+  const perBranchCacheReadCost =
+    (cachedBlockTokens * Math.max(0, numPolicies - 1) * pricing.cacheRead) /
+    1_000_000;
+
+  // Output cost per request at batch rate
+  const perRequestOutputCost =
+    (outputTokens * pricing.batchOutput) / 1_000_000;
+
+  // Per-policy attribution: sum across all branches for that policy
+  const perPolicy = policyTokensList.map((p) => {
+    const policyInputCost =
+      (p.tokens * branchCount * pricing.batchInput) / 1_000_000;
+    const policyOutputCost = perRequestOutputCost * branchCount;
+    // Spread cache cost evenly across policies for attribution
+    const policyCacheShare =
+      (perBranchCacheWriteCost + perBranchCacheReadCost) / numPolicies;
+    const batchApiCost =
+      policyInputCost + policyOutputCost + policyCacheShare * branchCount;
+    return {
+      policyName: p.name,
+      policyTokens: p.tokens,
+      batchApiCost,
+    };
+  });
+
+  // Total batch API cost
+  const totalCacheWriteCost = perBranchCacheWriteCost * branchCount;
+  const totalCacheReadCost = perBranchCacheReadCost * branchCount;
+  const totalPolicyInputCost =
+    policyTokensList.reduce((sum, p) => sum + p.tokens, 0) *
+    branchCount *
+    pricing.batchInput /
+    1_000_000;
+  const totalOutputCost = perRequestOutputCost * totalRequests;
+  const totalBatchApiCost =
+    totalCacheWriteCost + totalCacheReadCost + totalPolicyInputCost + totalOutputCost;
+
+  // No-cache reference: all tokens at standard input rate
+  const totalInputTokensNc =
+    (instructionTokens + avgBranchTokens) * totalRequests +
+    policyTokensList.reduce((sum, p) => sum + p.tokens, 0) * branchCount;
+  const totalNoCacheCost =
+    (totalInputTokensNc * pricing.input) / 1_000_000 +
+    (outputTokens * totalRequests * pricing.output) / 1_000_000;
+
+  return {
+    model: resolved,
+    branchCount,
+    policyCount: numPolicies,
+    totalRequests,
+    totalBatchApiCost,
+    totalNoCacheCost,
+    perPolicy,
+  };
+}
+
+/** Format a per-branch cost estimate for CLI display. */
+export function formatPerBranchEstimate(est: PerBranchCostEstimate): string {
+  const lines: string[] = [];
+  const fmt = (n: number) => `$${n.toFixed(4)}`;
+
+  lines.push(`Per-branch audit estimate (${est.model}):`);
+  lines.push(
+    `  Branches: ${est.branchCount}, Policies: ${est.policyCount}, Total requests: ${est.totalRequests}`,
+  );
+  lines.push("");
+
+  // Per-policy rows
+  lines.push("  Per-policy breakdown:");
+  for (const p of est.perPolicy) {
+    const tokK = Math.round(p.policyTokens / 1000);
+    lines.push(`    ${p.policyName.padEnd(30)} ${tokK}K tokens  ${fmt(p.batchApiCost)}`);
+  }
+
+  lines.push("");
+  lines.push(`  Without caching (reference):  ${fmt(est.totalNoCacheCost)}`);
+  lines.push(`  Batch API + caching (est):    ${fmt(est.totalBatchApiCost)}`);
+
+  const savings = est.totalNoCacheCost - est.totalBatchApiCost;
+  if (savings > 0) {
+    const pct = ((savings / est.totalNoCacheCost) * 100).toFixed(0);
+    lines.push(`  Estimated savings:            ${fmt(savings)} (${pct}%)`);
+  }
 
   return lines.join("\n");
 }

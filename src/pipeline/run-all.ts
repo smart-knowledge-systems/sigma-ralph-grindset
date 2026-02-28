@@ -8,14 +8,20 @@ import { log, initFileLogging, cleanupLogs } from "../logging";
 import { events } from "../events";
 import { initDatabase, recordCheckpoint } from "../db";
 import { generateBranches } from "../branches/generate";
-import { runAudit, discoverPolicies } from "../audit/run-audit";
+import {
+  runAudit,
+  discoverPolicies,
+  computePerBranchCostEstimate,
+  waitForConfirmation,
+} from "../audit/run-audit";
+import { formatPerBranchEstimate } from "../pricing";
+import { randomUUID } from "crypto";
 import { runFixes } from "../fixes/run-fixes";
 
 interface PipelineOptions {
   forceAll: boolean;
   diffMode: boolean;
   diffRef?: string;
-  combinedMode: boolean;
   mode: AuditMode;
 }
 
@@ -91,20 +97,8 @@ export async function runPipeline(
 
     // Step 2: Run audit
     events.emit({ type: "pipeline:phase", phase: "audit", status: "started" });
-    if (opts.combinedMode) {
-      log.info(`--- Step 2: Audit combined (${policies.length} policies) ---`);
-      await runAudit(config, {
-        policies,
-        forceAll: opts.forceAll,
-        diffMode: opts.diffMode,
-        diffRef: opts.diffRef,
-        mode: opts.mode,
-        dryRun: false,
-        maxLoc: 2000,
-      });
-      log.info("");
-    } else {
-      // Per-policy loop
+    if (opts.mode === "cli" || policies.length === 1) {
+      // CLI mode or single policy: sequential per-policy
       for (let i = 0; i < policies.length; i++) {
         const policyName = policies[i]!;
         log.info(
@@ -120,6 +114,61 @@ export async function runPipeline(
         });
         log.info("");
       }
+    } else {
+      // Multi-policy batch: compute upfront cost, single confirmation, parallel batches
+      log.info(
+        `--- Step 2: Audit (${policies.length} policies, per-branch batch) ---`,
+      );
+
+      const estimate = computePerBranchCostEstimate(config, policies);
+      log.info(formatPerBranchEstimate(estimate));
+      events.emit({
+        type: "cost:estimate:aggregated",
+        estimate,
+      });
+
+      // Single confirmation for all policies
+      const requestId = randomUUID();
+      events.emit({
+        type: "cost:confirm-request",
+        estimate: {
+          model: estimate.model,
+          branchCount: estimate.branchCount,
+          totalInputTokens: 0,
+          totalOutputTokens: 0,
+          noCacheCost: estimate.totalNoCacheCost,
+          cachingEnabled: true,
+          cachingSavings:
+            estimate.totalNoCacheCost - estimate.totalBatchApiCost,
+          standardApiCost: estimate.totalBatchApiCost,
+          batchApiCost: estimate.totalBatchApiCost,
+          batchNoCacheCost: estimate.totalNoCacheCost,
+          batchWithCacheCost: estimate.totalBatchApiCost,
+          batchCachingEnabled: true,
+        },
+        requestId,
+      });
+
+      const approved = await waitForConfirmation(requestId);
+      if (!approved) {
+        log.info("Audit cancelled by user.");
+        events.emit({
+          type: "pipeline:complete",
+          success: false,
+        });
+        return;
+      }
+
+      await runAudit(config, {
+        policies,
+        forceAll: opts.forceAll,
+        diffMode: opts.diffMode,
+        diffRef: opts.diffRef,
+        mode: opts.mode,
+        dryRun: false,
+        costApproved: true,
+      });
+      log.info("");
     }
 
     events.emit({

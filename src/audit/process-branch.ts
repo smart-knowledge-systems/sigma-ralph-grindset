@@ -124,9 +124,11 @@ export async function processBranch(
 
     return { success: true, issueCount };
   } catch (e: unknown) {
-    const err = e as Error & { errorType?: string; stderr?: string };
-    const errorMsg = err.stderr
-      ? `${err.message}: ${err.stderr.slice(0, 500)}`
+    const err = e instanceof Error ? e : new Error(String(e));
+    const errorType = (e as { errorType?: string }).errorType;
+    const stderr = (e as { stderr?: string }).stderr;
+    const errorMsg = stderr
+      ? `${err.message}: ${stderr.slice(0, 500)}`
       : err.message;
     updateScanStatus(config, scanId, "failed", {
       errorMessage: errorMsg.slice(0, 4000),
@@ -138,6 +140,6 @@ export async function processBranch(
       policy: policyLabel,
     });
     log.error(`Failed for ${branchLabel}: ${err.message}`);
-    return { success: false, issueCount: 0, errorType: err.errorType };
+    return { success: false, issueCount: 0, errorType };
   }
 }

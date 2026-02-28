@@ -22,7 +22,6 @@ export interface AuditConfig {
   defaultDiffRef: string;
   defaultForceAll: boolean;
   defaultDryRun: boolean;
-  defaultPerPolicy: boolean;
   defaultStdout: boolean;
   defaultInteractive: boolean;
   defaultSkipCommits: boolean;
@@ -106,7 +105,6 @@ export interface CliOptions {
   skipCommits: boolean;
   maxLoc?: number;
   stdout: boolean;
-  perPolicy: boolean;
   ui: boolean;
 }
 
@@ -136,6 +134,21 @@ export interface DbIssue {
 
 /** Scan status in the database */
 export type ScanStatus = "running" | "completed" | "failed" | "skipped";
+
+/** Per-branch cost estimate with per-policy attribution */
+export interface PerBranchCostEstimate {
+  model: string;
+  branchCount: number;
+  policyCount: number;
+  totalRequests: number;
+  totalBatchApiCost: number;
+  totalNoCacheCost: number;
+  perPolicy: Array<{
+    policyName: string;
+    policyTokens: number;
+    batchApiCost: number;
+  }>;
+}
 
 /** Fix status in the database */
 export type FixStatus =

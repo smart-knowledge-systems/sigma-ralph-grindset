@@ -29,7 +29,8 @@ export function isExcludedPath(
 
 /** Map the first file extension to a code fence language tag. */
 export function extToLang(extensions: string[]): string {
-  const first = extensions[0];
+  if (extensions.length === 0) return "";
+  const first = extensions[0]!;
   const map: Record<string, string> = {
     ts: "typescript",
     tsx: "typescript",
@@ -41,7 +42,7 @@ export function extToLang(extensions: string[]): string {
     go: "go",
     rs: "rust",
   };
-  return map[first ?? ""] ?? first ?? "";
+  return map[first] ?? first;
 }
 
 /** Human-readable label for configured extensions. */
@@ -89,7 +90,6 @@ export function findSourceFiles(
       const relPath = relative(config.projectRoot, fullPath);
 
       if (entry.isDirectory()) {
-        if (flat && depth > 0) continue;
         if (isExcludedPath(relPath, config.excludeDirs)) continue;
         scan(fullPath, depth + 1);
       } else if (entry.isFile()) {

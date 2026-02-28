@@ -31,8 +31,8 @@ RULES:
       if (content.trim()) {
         prompt += `\n--- ${policyName} ---\n\n${content}\n`;
       }
-    } catch {
-      log.warn(`Policy file not readable: ${policyFile}`);
+    } catch (e) {
+      log.warn(`Policy file not readable: ${policyName} — ${e instanceof Error ? e.message : "unknown error"}`);
     }
   }
 

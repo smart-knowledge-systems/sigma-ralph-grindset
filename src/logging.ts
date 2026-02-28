@@ -44,10 +44,14 @@ export function initFileLogging(baseDir: string): void {
   logFilePath = resolve(logTmpDir, `run-${ts}.log`);
 }
 
+function isValidLogLevel(s: string): s is LogLevel {
+  return s in LEVEL_NUM;
+}
+
 /** Set the console log level from env or explicit value. */
 export function setLogLevel(level?: string): void {
-  const resolved = (level ?? process.env.LOG_LEVEL ?? "info") as LogLevel;
-  consoleLevel = LEVEL_NUM[resolved] ?? LEVEL_NUM.info;
+  const raw = level ?? process.env.LOG_LEVEL ?? "info";
+  consoleLevel = isValidLogLevel(raw) ? LEVEL_NUM[raw] : LEVEL_NUM.info;
 }
 
 /** Clean up log directory based on pipeline outcome. */

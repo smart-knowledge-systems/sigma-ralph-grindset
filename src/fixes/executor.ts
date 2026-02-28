@@ -77,7 +77,12 @@ export async function fixBatch(
 
     let claudeOutput = "";
     if (!opts.interactive) {
-      claudeOutput = await new Response(proc.stdout).text();
+      // Consume both streams to prevent buffer backpressure
+      const [stdoutText] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      claudeOutput = stdoutText;
     }
     const exitCode = await proc.exited;
 
@@ -96,7 +101,10 @@ export async function fixBatch(
       stdout: "pipe",
       stderr: "pipe",
     });
-    const checkOutput = await new Response(checkProc.stdout).text();
+    const [checkOutput] = await Promise.all([
+      new Response(checkProc.stdout).text(),
+      new Response(checkProc.stderr).text(),
+    ]);
     const checkExit = await checkProc.exited;
 
     if (checkExit === 0) {
@@ -109,6 +117,10 @@ export async function fixBatch(
         stdout: "pipe",
         stderr: "pipe",
       });
+      await Promise.all([
+        new Response(fmtProc.stdout).text(),
+        new Response(fmtProc.stderr).text(),
+      ]);
       await fmtProc.exited;
 
       // Commit
@@ -131,6 +143,10 @@ export async function fixBatch(
             cwd: config.projectRoot,
           },
         );
+        await Promise.all([
+          new Response(commitProc.stdout).text(),
+          new Response(commitProc.stderr).text(),
+        ]);
         await commitProc.exited;
       }
 

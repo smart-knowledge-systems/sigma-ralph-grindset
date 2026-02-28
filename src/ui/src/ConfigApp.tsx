@@ -1,4 +1,10 @@
 import { CSSProperties, useEffect, useState } from "react";
+import {
+  brandRow as sharedBrandRow,
+  brandMark as sharedBrandMark,
+  brandTitle as sharedBrandTitle,
+  brandSub as sharedBrandSub,
+} from "./components/styles";
 
 interface ConfigField {
   key: string;
@@ -13,6 +19,21 @@ interface ConfigField {
 type ConfigValues = Record<string, string | string[] | number | boolean>;
 
 const MODEL_OPTIONS = ["haiku", "sonnet", "opus"];
+
+function isConfigResponse(
+  data: unknown,
+): data is { fields: ConfigField[]; values: ConfigValues } {
+  if (data == null || typeof data !== "object") return false;
+  const obj = data as Record<string, unknown>;
+  return Array.isArray(obj.fields) && typeof obj.values === "object" && obj.values != null;
+}
+
+function isSaveResponse(
+  data: unknown,
+): data is { ok?: boolean; errors?: Record<string, string> } {
+  if (data == null || typeof data !== "object") return false;
+  return true;
+}
 
 const ROOT_MODES = [
   { value: "", label: "Parent directory (auto-detect)" },
@@ -30,9 +51,16 @@ export default function ConfigApp() {
   const [customRoot, setCustomRoot] = useState("");
 
   useEffect(() => {
+    let ignore = false;
     fetch("/api/config")
       .then((r) => r.json())
-      .then((data: { fields: ConfigField[]; values: ConfigValues }) => {
+      .then((data: unknown) => {
+        if (ignore) return;
+        if (!isConfigResponse(data)) {
+          setErrors({ _general: "Invalid configuration response" });
+          setLoading(false);
+          return;
+        }
         setFields(data.fields);
         setValues(data.values);
         const root = data.values.PROJECT_ROOT as string;
@@ -40,7 +68,15 @@ export default function ConfigApp() {
           setCustomRoot(root);
         }
         setLoading(false);
+      })
+      .catch(() => {
+        if (ignore) return;
+        setErrors({ _general: "Failed to load configuration" });
+        setLoading(false);
       });
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   function setValue(key: string, val: string | string[] | number | boolean) {
@@ -51,17 +87,26 @@ export default function ConfigApp() {
   async function save() {
     setSaving(true);
     setErrors({});
-    const res = await fetch("/api/config", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(values),
-    });
-    const data = await res.json();
-    setSaving(false);
-    if (data.ok) {
-      setSaved(true);
-    } else if (data.errors) {
-      setErrors(data.errors);
+    try {
+      const res = await fetch("/api/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(values),
+      });
+      const data: unknown = await res.json();
+      if (!isSaveResponse(data)) {
+        setErrors({ _general: "Invalid server response" });
+        return;
+      }
+      if (data.ok) {
+        setSaved(true);
+      } else if (data.errors) {
+        setErrors(data.errors);
+      }
+    } catch {
+      setErrors({ _general: "Network error" });
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -69,6 +114,11 @@ export default function ConfigApp() {
     return (
       <div style={shell}>
         <div style={loadingText}>Loading configuration...</div>
+        {errors._general && (
+          <div style={{ ...errorText, textAlign: "center" }}>
+            {errors._general}
+          </div>
+        )}
       </div>
     );
   }
@@ -170,6 +220,10 @@ export default function ConfigApp() {
             </div>
           );
         })}
+
+        {errors._general && (
+          <div style={errorText}>{errors._general}</div>
+        )}
 
         <div style={buttonRow}>
           <button
@@ -307,43 +361,10 @@ const header: CSSProperties = {
   padding: "20px 0 16px",
 };
 
-const brandRow: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 12,
-};
-
-const brandMark: CSSProperties = {
-  width: 40,
-  height: 40,
-  borderRadius: 10,
-  background: "linear-gradient(135deg, #FFD90F 0%, #F5C800 100%)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontWeight: 800,
-  fontSize: 22,
-  color: "#3D3D3D",
-  boxShadow: "0 2px 8px rgba(255, 217, 15, 0.3)",
-};
-
-const brandTitle: CSSProperties = {
-  margin: 0,
-  fontSize: 22,
-  fontWeight: 800,
-  color: "#3D3D3D",
-  letterSpacing: 1.5,
-  lineHeight: 1,
-};
-
-const brandSub: CSSProperties = {
-  margin: 0,
-  fontSize: 11,
-  fontWeight: 600,
-  color: "#8C8370",
-  letterSpacing: 0.5,
-  lineHeight: 1.3,
-};
+const brandRow = sharedBrandRow;
+const brandMark = sharedBrandMark;
+const brandTitle = sharedBrandTitle;
+const brandSub = sharedBrandSub;
 
 const formContainer: CSSProperties = {
   display: "flex",

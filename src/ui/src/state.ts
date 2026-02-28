@@ -19,6 +19,7 @@ export function createInitialState(): UIState {
       batches: {},
     },
     costEstimate: null,
+    costEstimateAggregated: null,
     costConfirmRequest: null,
     logs: [],
     startTime: new Date().toISOString(),
@@ -251,6 +252,9 @@ export function reducer(state: UIState, event: PipelineEvent): UIState {
 
     case "cost:estimate":
       return { ...state, costEstimate: event.estimate };
+
+    case "cost:estimate:aggregated":
+      return { ...state, costEstimateAggregated: event.estimate };
 
     case "cost:confirm-request":
       return {

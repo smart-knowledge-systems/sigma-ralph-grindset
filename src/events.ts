@@ -2,7 +2,7 @@
 // Typed singleton event bus for pipeline progress tracking
 // ============================================================================
 
-import type { CostEstimate } from "./types";
+import type { CostEstimate, PerBranchCostEstimate } from "./types";
 
 export type PipelineEvent =
   | { type: "pipeline:start"; phase: string; totalPolicies: number }
@@ -68,6 +68,10 @@ export type PipelineEvent =
       };
     }
   | {
+      type: "cost:estimate:aggregated";
+      estimate: PerBranchCostEstimate;
+    }
+  | {
       type: "cost:confirm-request";
       estimate: CostEstimate;
       requestId: string;
@@ -86,7 +90,7 @@ type TypedHandler<T extends PipelineEvent["type"]> = (
 
 class PipelineEventBus {
   private anyHandlers = new Set<Handler>();
-  private typedHandlers = new Map<string, Handler[]>();
+  private typedHandlers = new Map<string, Set<Handler>>();
 
   emit(event: PipelineEvent): void {
     for (const handler of this.anyHandlers) {
@@ -119,16 +123,16 @@ class PipelineEventBus {
     type: T,
     handler: TypedHandler<T>,
   ): () => void {
-    const handlers = this.typedHandlers.get(type) ?? [];
-    handlers.push(handler as Handler);
-    this.typedHandlers.set(type, handlers);
+    let handlers = this.typedHandlers.get(type);
+    if (!handlers) {
+      handlers = new Set();
+      this.typedHandlers.set(type, handlers);
+    }
+    handlers.add(handler as Handler);
     return () => {
       const current = this.typedHandlers.get(type);
       if (current) {
-        this.typedHandlers.set(
-          type,
-          current.filter((h) => h !== handler),
-        );
+        current.delete(handler as Handler);
       }
     };
   }
@@ -139,10 +143,7 @@ class PipelineEventBus {
   ): void {
     const handlers = this.typedHandlers.get(type);
     if (handlers) {
-      this.typedHandlers.set(
-        type,
-        handlers.filter((h) => h !== handler),
-      );
+      handlers.delete(handler as Handler);
     }
   }
 

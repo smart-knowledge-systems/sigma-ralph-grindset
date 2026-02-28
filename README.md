@@ -67,7 +67,6 @@ SIGMA auto-detects portable mode: when the parent directory has `.git`, `PROJECT
 | `--model <name>` | Override audit model |
 | `--dry-run` | Show cost estimate, don't execute |
 | `--max-loc <n>` | Override MAX_LOC |
-| `--per-policy` | Force per-policy iteration (default for CLI mode) |
 | `--stdout` | Terminal-only output (no browser UI) |
 
 ### Fix Options

@@ -1,50 +1,20 @@
 import { CSSProperties } from "react";
 import type { AuditState } from "../types";
+import StatusBadge from "./StatusBadge";
+import {
+  card,
+  cardHeader,
+  cardFooter,
+  headerStats,
+  statChip,
+  fileBadge,
+  progressTrack,
+  progressFill,
+  emptyCard,
+} from "./styles";
 
 interface Props {
   audits: Record<string, AuditState>;
-}
-
-function StatusBadge({
-  status,
-}: {
-  status: "running" | "done" | "failed" | "pending";
-}) {
-  const badgeStyles: Record<string, CSSProperties> = {
-    pending: {
-      background: "#F0E8D0",
-      color: "#8C8370",
-      border: "1px solid #E0D6BC",
-    },
-    running: {
-      background: "#FFF4CC",
-      color: "#B38F00",
-      border: "1px solid #FFD90F",
-      animation: "sigmaPulse 1.8s ease-in-out infinite",
-    },
-    done: {
-      background: "#E6F5F2",
-      color: "#2A9D8F",
-      border: "1px solid #2A9D8F",
-    },
-    failed: {
-      background: "#FCEAEA",
-      color: "#D63333",
-      border: "1px solid #D63333",
-    },
-  };
-  const labels: Record<string, string> = {
-    pending: "Pending",
-    running: "Running",
-    done: "Done",
-    failed: "Failed",
-  };
-  return (
-    <span style={{ ...badge, ...badgeStyles[status] }}>
-      {status === "running" && <span style={spinnerDot}>●</span>}
-      {labels[status]}
-    </span>
-  );
 }
 
 export default function AuditProgress({ audits }: Props) {
@@ -52,7 +22,7 @@ export default function AuditProgress({ audits }: Props) {
   if (auditEntries.length === 0) {
     return (
       <div style={emptyCard}>
-        <span style={{ fontSize: 24 }}>⊙</span>
+        <span style={{ fontSize: 24 }}>&#x2299;</span>
         <span style={{ color: "#8C8370", fontWeight: 600 }}>
           Waiting for audit to begin...
         </span>
@@ -112,9 +82,9 @@ export default function AuditProgress({ audits }: Props) {
                     {path}
                   </span>
                   <span style={fileBadge}>{branch.fileCount} files</span>
-                  <StatusBadge status={branch.status} />
+                  <StatusBadge status={branch.status === "running" ? "running" : branch.status === "done" ? "done" : branch.status === "failed" ? "failed" : "pending"} />
                   <span style={issueCount}>
-                    {branch.status === "done" ? branch.issueCount : "—"}
+                    {branch.status === "done" ? branch.issueCount : "\u2014"}
                   </span>
                 </div>
               ))}
@@ -123,9 +93,9 @@ export default function AuditProgress({ audits }: Props) {
             {/* Footer summary */}
             {audit.processed > 0 && (
               <div style={cardFooter}>
-                <span style={{ color: "#2A9D8F" }}>✓ {audit.succeeded}</span>
+                <span style={{ color: "#2A9D8F" }}>&#x2713; {audit.succeeded}</span>
                 {audit.failed > 0 && (
-                  <span style={{ color: "#D63333" }}>✗ {audit.failed}</span>
+                  <span style={{ color: "#D63333" }}>&#x2717; {audit.failed}</span>
                 )}
               </div>
             )}
@@ -142,22 +112,6 @@ const wrapper: CSSProperties = {
   gap: 16,
 };
 
-const card: CSSProperties = {
-  background: "#FFFFFF",
-  borderRadius: 12,
-  border: "1px solid #EDE5CC",
-  padding: 0,
-  overflow: "hidden",
-  boxShadow: "0 1px 4px rgba(61, 61, 61, 0.06)",
-};
-
-const cardHeader: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "14px 18px 10px",
-};
-
 const policyTag: CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: 13,
@@ -167,33 +121,6 @@ const policyTag: CSSProperties = {
   padding: "3px 12px",
   borderRadius: 20,
   border: "1px solid #FFD90F",
-};
-
-const headerStats: CSSProperties = {
-  display: "flex",
-  gap: 10,
-  alignItems: "center",
-};
-
-const statChip: CSSProperties = {
-  fontSize: 12,
-  fontWeight: 600,
-  color: "#8C8370",
-};
-
-const progressTrack: CSSProperties = {
-  height: 3,
-  background: "#F0E8D0",
-  margin: "0 18px",
-  borderRadius: 2,
-  overflow: "hidden",
-};
-
-const progressFill: CSSProperties = {
-  height: "100%",
-  background: "linear-gradient(90deg, #FFD90F, #2A9D8F)",
-  borderRadius: 2,
-  transition: "width 0.5s ease",
 };
 
 const branchList: CSSProperties = {
@@ -231,59 +158,10 @@ const branchPath: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const fileBadge: CSSProperties = {
-  fontSize: 11,
-  fontWeight: 600,
-  color: "#8C8370",
-  background: "#F5EED8",
-  padding: "2px 8px",
-  borderRadius: 10,
-  whiteSpace: "nowrap",
-};
-
-const badge: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 4,
-  fontSize: 11,
-  fontWeight: 700,
-  padding: "2px 10px",
-  borderRadius: 20,
-  whiteSpace: "nowrap",
-  letterSpacing: 0.3,
-};
-
-const spinnerDot: CSSProperties = {
-  fontSize: 8,
-  animation: "sigmaPulse 1s ease-in-out infinite",
-};
-
 const issueCount: CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: 12,
   fontWeight: 600,
   textAlign: "right",
   color: "#5C5545",
-};
-
-const cardFooter: CSSProperties = {
-  display: "flex",
-  gap: 16,
-  padding: "10px 18px",
-  borderTop: "1px solid #F0E8D0",
-  fontSize: 13,
-  fontWeight: 700,
-};
-
-const emptyCard: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 12,
-  padding: 48,
-  background: "#FFFFFF",
-  borderRadius: 12,
-  border: "1px solid #EDE5CC",
-  boxShadow: "0 1px 4px rgba(61, 61, 61, 0.06)",
 };

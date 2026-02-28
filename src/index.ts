@@ -7,7 +7,7 @@ import { loadConfig } from "./config";
 import { log, setLogLevel, initFileLogging, cleanupLogs } from "./logging";
 
 function printUsage(): void {
-  console.log(`Usage: sigma <command> [options]
+  log.info(`Usage: sigma <command> [options]
 
 Commands:
   audit [policies...]   Run code quality audit
@@ -23,7 +23,6 @@ Audit options:
   --model <name>        Override audit model
   --dry-run             Show cost estimate, don't execute
   --max-loc <n>         Override MAX_LOC
-  --per-policy          Force per-policy iteration (default for CLI mode)
 
 Fix options:
   --interactive         Open Claude interactively
@@ -47,7 +46,7 @@ function parseArgs(argv: string[]): CliOptions {
 
   const command = args[0] as CliOptions["command"];
   if (!["audit", "fix", "all", "branches", "config"].includes(command)) {
-    console.error(`Unknown command: ${command}`);
+    log.error(`Unknown command: ${command}`);
     printUsage();
     process.exit(1);
   }
@@ -64,7 +63,6 @@ function parseArgs(argv: string[]): CliOptions {
     interactive: false,
     skipCommits: false,
     stdout: false,
-    perPolicy: false,
     ui: false,
   };
 
@@ -102,7 +100,7 @@ function parseArgs(argv: string[]): CliOptions {
       case "--max-loc": {
         const n = parseInt(args[++i]!, 10);
         if (isNaN(n)) {
-          console.error("--max-loc requires a numeric value");
+          log.error("--max-loc requires a numeric value");
           process.exit(1);
         }
         opts.maxLoc = n;
@@ -117,14 +115,8 @@ function parseArgs(argv: string[]): CliOptions {
       case "--stdout":
         opts.stdout = true;
         break;
-      case "--per-policy":
-        opts.perPolicy = true;
-        break;
       case "--ui":
         opts.ui = true;
-        break;
-      case "--combined":
-        // Handled by 'all' command — no-op
         break;
       case "-h":
       case "--help":
@@ -133,7 +125,7 @@ function parseArgs(argv: string[]): CliOptions {
         break;
       default:
         if (arg.startsWith("-")) {
-          console.error(`Unknown flag: ${arg}`);
+          log.error(`Unknown flag: ${arg}`);
           process.exit(1);
         }
         // Positional arg = policy name
@@ -173,7 +165,6 @@ async function main(): Promise<void> {
     opts.diffRef = config.defaultDiffRef;
   if (!has("--all") && config.defaultForceAll) opts.forceAll = true;
   if (!has("--dry-run") && config.defaultDryRun) opts.dryRun = true;
-  if (!has("--per-policy") && config.defaultPerPolicy) opts.perPolicy = true;
   if (!has("--stdout") && config.defaultStdout) opts.stdout = true;
   if (!has("--interactive") && config.defaultInteractive)
     opts.interactive = true;
@@ -245,26 +236,96 @@ async function main(): Promise<void> {
       }
 
       case "audit": {
-        const { runAudit, discoverPolicies } =
-          await import("./audit/run-audit");
+        const {
+          runAudit,
+          discoverPolicies,
+          computePerBranchCostEstimate,
+          waitForConfirmation,
+        } = await import("./audit/run-audit");
+        const { formatPerBranchEstimate } = await import("./pricing");
+        const { events } = await import("./events");
+        const { randomUUID } = await import("crypto");
         const policies =
           opts.policies.length > 0 ? opts.policies : discoverPolicies(config);
 
-        const perPolicy = mode === "cli" || opts.perPolicy;
-        const auditOpts = {
-          forceAll: opts.forceAll,
-          diffMode: opts.diff,
-          diffRef: opts.diffRef,
-          mode,
-          dryRun: opts.dryRun,
-        };
-
-        if (perPolicy) {
+        if (mode === "cli") {
+          // CLI mode: sequential per-policy
           for (const policy of policies) {
-            await runAudit(config, { ...auditOpts, policies: [policy] });
+            await runAudit(config, {
+              policies: [policy],
+              forceAll: opts.forceAll,
+              diffMode: opts.diff,
+              diffRef: opts.diffRef,
+              mode,
+              dryRun: opts.dryRun,
+            });
           }
+        } else if (policies.length > 1) {
+          // Multi-policy batch: compute upfront cost, single confirmation
+          const estimate = computePerBranchCostEstimate(
+            config,
+            policies,
+          );
+
+          log.info(formatPerBranchEstimate(estimate));
+          events.emit({
+            type: "cost:estimate:aggregated",
+            estimate,
+          });
+
+          if (opts.dryRun) {
+            log.info("\n--dry-run: exiting without executing.");
+            break;
+          }
+
+          // Single confirmation for all policies
+          const requestId = randomUUID();
+          events.emit({
+            type: "cost:confirm-request",
+            estimate: {
+              model: estimate.model,
+              branchCount: estimate.branchCount,
+              totalInputTokens: 0,
+              totalOutputTokens: 0,
+              noCacheCost: estimate.totalNoCacheCost,
+              cachingEnabled: true,
+              cachingSavings:
+                estimate.totalNoCacheCost - estimate.totalBatchApiCost,
+              standardApiCost: estimate.totalBatchApiCost,
+              batchApiCost: estimate.totalBatchApiCost,
+              batchNoCacheCost: estimate.totalNoCacheCost,
+              batchWithCacheCost: estimate.totalBatchApiCost,
+              batchCachingEnabled: true,
+            },
+            requestId,
+          });
+
+          const approved = await waitForConfirmation(requestId);
+          if (!approved) {
+            log.info("Audit cancelled by user.");
+            break;
+          }
+
+          // Run with pre-approved cost
+          await runAudit(config, {
+            policies,
+            forceAll: opts.forceAll,
+            diffMode: opts.diff,
+            diffRef: opts.diffRef,
+            mode,
+            dryRun: false,
+            costApproved: true,
+          });
         } else {
-          await runAudit(config, { ...auditOpts, policies });
+          // Single policy batch: standard flow
+          await runAudit(config, {
+            policies,
+            forceAll: opts.forceAll,
+            diffMode: opts.diff,
+            diffRef: opts.diffRef,
+            mode,
+            dryRun: opts.dryRun,
+          });
         }
         break;
       }
@@ -281,13 +342,10 @@ async function main(): Promise<void> {
 
       case "all": {
         const { runPipeline } = await import("./pipeline/run-all");
-        // Check if --combined was passed (re-parse to detect it)
-        const combinedMode = process.argv.includes("--combined");
         await runPipeline(config, {
           forceAll: opts.forceAll,
           diffMode: opts.diff,
           diffRef: opts.diffRef,
-          combinedMode,
           mode,
         });
         break;

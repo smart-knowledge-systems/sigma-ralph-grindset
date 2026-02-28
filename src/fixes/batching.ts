@@ -6,29 +6,39 @@ import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import type { AuditConfig, FileWithLoc, FixBatch } from "../types";
 import { getDb } from "../db";
+import { log } from "../logging";
 
 /**
  * Get distinct file paths from all pending issues, with LOC counts.
  */
 export function getFixFilesWithLoc(
   config: AuditConfig,
-  policySqlFilter?: string,
+  policyFilter?: string,
 ): FileWithLoc[] {
   const d = getDb(config);
-  const filter = policySqlFilter ?? "";
 
-  const rows = d
-    .prepare(
-      `SELECT DISTINCT f.path
+  const sql = policyFilter
+    ? `SELECT DISTINCT f.path
        FROM issues i
        JOIN issue_files jf ON jf.issue_id = i.id
        JOIN files f ON jf.file_id = f.id
        JOIN scans s ON i.scan_id = s.id
        WHERE i.fix_status = 'pending'
-       ${filter}
-       ORDER BY f.path`,
-    )
-    .all() as Array<{ path: string }>;
+       AND s.policy = ?
+       ORDER BY f.path`
+    : `SELECT DISTINCT f.path
+       FROM issues i
+       JOIN issue_files jf ON jf.issue_id = i.id
+       JOIN files f ON jf.file_id = f.id
+       JOIN scans s ON i.scan_id = s.id
+       WHERE i.fix_status = 'pending'
+       ORDER BY f.path`;
+
+  const rows = (
+    policyFilter
+      ? d.prepare(sql).all(policyFilter)
+      : d.prepare(sql).all()
+  ) as Array<{ path: string }>;
 
   return rows.map((row) => {
     const fullPath = resolve(config.projectRoot, row.path);
@@ -36,8 +46,8 @@ export function getFixFilesWithLoc(
     if (existsSync(fullPath)) {
       try {
         loc = readFileSync(fullPath, "utf-8").split("\n").length;
-      } catch {
-        // skip
+      } catch (e) {
+        log.warn(`Failed to read file for LOC count: ${row.path} — ${e instanceof Error ? e.message : "unknown error"}`);
       }
     }
     return { path: row.path, loc };

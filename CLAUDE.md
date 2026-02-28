@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Policy-based code auditing and remediation system. TypeScript on Bun, uses Anthropic API (batch + single) and Claude CLI.
+Policy-based code auditing and remediation system. TypeScript on Bun, uses Anthropic API (batch + single) and Claude CLI. Use `bun` and `bunx`
 
 ## Commands
 

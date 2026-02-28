@@ -2,8 +2,8 @@
 // HTTP server for live progress UI — uses Bun.serve with SSE
 // ============================================================================
 
-import { resolve } from "path";
-import { existsSync } from "fs";
+import { resolve, normalize } from "path";
+import { existsSync, realpathSync } from "fs";
 import type { PipelineEvent } from "./events";
 import { events } from "./events";
 
@@ -57,6 +57,19 @@ interface AccumulatedState {
     standardCost: number;
     batchCost: number;
   } | null;
+  costEstimateAggregated: {
+    model: string;
+    branchCount: number;
+    policyCount: number;
+    totalRequests: number;
+    totalBatchApiCost: number;
+    totalNoCacheCost: number;
+    perPolicy: Array<{
+      policyName: string;
+      policyTokens: number;
+      batchApiCost: number;
+    }>;
+  } | null;
   costConfirmRequest: {
     estimate: {
       model: string;
@@ -87,6 +100,7 @@ function createInitialState(): AccumulatedState {
       batches: {},
     },
     costEstimate: null,
+    costEstimateAggregated: null,
     costConfirmRequest: null,
     logs: [],
     startTime: new Date().toISOString(),
@@ -204,6 +218,9 @@ function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
     case "cost:estimate":
       state.costEstimate = event.estimate;
       break;
+    case "cost:estimate:aggregated":
+      state.costEstimateAggregated = event.estimate;
+      break;
     case "cost:confirm-request":
       state.costConfirmRequest = {
         estimate: {
@@ -290,10 +307,21 @@ export function startServer(): { port: number; stop: () => Promise<void> } {
 
       "/api/confirm": {
         async POST(req: Request) {
-          const body = (await req.json()) as {
-            approved: boolean;
-            requestId: string;
-          };
+          const body = await req.json();
+          if (
+            !body ||
+            typeof body !== "object" ||
+            typeof body.approved !== "boolean" ||
+            typeof body.requestId !== "string"
+          ) {
+            return Response.json(
+              { error: "Invalid body: requires { approved: boolean, requestId: string }" },
+              {
+                status: 400,
+                headers: { "Access-Control-Allow-Origin": "*" },
+              },
+            );
+          }
           events.emit({
             type: "cost:confirm-response",
             approved: body.approved,
@@ -332,8 +360,11 @@ export function startServer(): { port: number; stop: () => Promise<void> } {
 
       // Serve static files from dist
       if (filePath.startsWith("/assets/")) {
-        const assetPath = resolve(distDir, filePath.slice(1));
-        if (existsSync(assetPath)) {
+        const assetPath = resolve(distDir, normalize(filePath.slice(1)));
+        if (
+          existsSync(assetPath) &&
+          realpathSync(assetPath).startsWith(realpathSync(distDir) + "/")
+        ) {
           return new Response(Bun.file(assetPath));
         }
       }
