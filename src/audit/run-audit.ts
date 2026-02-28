@@ -260,7 +260,13 @@ export async function waitForConfirmation(requestId: string): Promise<boolean> {
       } catch {
         // ignore
       }
-      resolve(input !== "n" && input !== "no");
+      const approved = input !== "n" && input !== "no";
+      events.emit({
+        type: "infra.cost.confirm.response",
+        approved,
+        requestId,
+      });
+      resolve(approved);
     };
     process.stdin.resume();
     process.stdin.on("data", onData);
@@ -304,7 +310,7 @@ async function processBatchEvents(
   estimatedCost: number,
   counters: AuditCounters,
 ): Promise<void> {
-  let lastProgressMsg = "";
+  const seenProgressMsgs = new Set<string>();
 
   for await (const event of eventIterator) {
     if (event.type === "complete") {
@@ -320,11 +326,11 @@ async function processBatchEvents(
         );
       }
     } else if (event.type === "progress") {
-      if (event.message === lastProgressMsg) {
+      if (seenProgressMsgs.has(event.message!)) {
         log.debug(event.message!);
       } else {
         log.info(event.message!);
-        lastProgressMsg = event.message!;
+        seenProgressMsgs.add(event.message!);
       }
     } else if (event.type === "result" && event.result && event.branchPath) {
       const scanPolicyLabel = event.policyName ?? policyLabel;

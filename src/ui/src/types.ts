@@ -77,6 +77,7 @@ export type PipelineEvent =
       estimate: CostEstimate;
       requestId: string;
     }
+  | { type: "infra.cost.confirm.response"; approved: boolean; requestId: string }
   | { type: "log"; level: string; message: string; timestamp: string };
 
 export interface BranchState {

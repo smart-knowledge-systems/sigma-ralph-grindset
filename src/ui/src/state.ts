@@ -276,6 +276,9 @@ export function reducer(state: UIState, event: ReducerAction): UIState {
         },
       };
 
+    case "infra.cost.confirm.response":
+      return { ...state, costConfirmRequest: null };
+
     case "log":
       return {
         ...state,
