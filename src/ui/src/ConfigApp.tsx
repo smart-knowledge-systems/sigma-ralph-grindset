@@ -25,7 +25,11 @@ function isConfigResponse(
 ): data is { fields: ConfigField[]; values: ConfigValues } {
   if (data == null || typeof data !== "object") return false;
   const obj = data as Record<string, unknown>;
-  return Array.isArray(obj.fields) && typeof obj.values === "object" && obj.values != null;
+  return (
+    Array.isArray(obj.fields) &&
+    typeof obj.values === "object" &&
+    obj.values != null
+  );
 }
 
 function isSaveResponse(
@@ -221,9 +225,7 @@ export default function ConfigApp() {
           );
         })}
 
-        {errors._general && (
-          <div style={errorText}>{errors._general}</div>
-        )}
+        {errors._general && <div style={errorText}>{errors._general}</div>}
 
         <div style={buttonRow}>
           <button

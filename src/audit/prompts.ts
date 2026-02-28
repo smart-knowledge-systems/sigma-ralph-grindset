@@ -37,7 +37,10 @@ Review the provided code and identify violations of the guidelines below. For ea
 - For the policy field, use the exact policy name from the section headers below`;
 
 /** Load and return the text content of a single policy file, or null if unavailable. */
-function loadPolicyText(config: AuditConfig, policyName: string): string | null {
+function loadPolicyText(
+  config: AuditConfig,
+  policyName: string,
+): string | null {
   const policyFile = resolve(config.policiesDir, policyName, "POLICY.md");
   if (!existsSync(policyFile)) return null;
   try {

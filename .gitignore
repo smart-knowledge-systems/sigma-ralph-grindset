@@ -18,3 +18,5 @@ test/test_helper/bats-file/
 src/ui/dist/
 src/ui/dist-config/
 src/ui/node_modules/
+.playwright-cli/
+.claude/skills/playwright-cli/

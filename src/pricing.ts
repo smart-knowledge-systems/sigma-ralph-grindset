@@ -2,7 +2,11 @@
 // Model-aware pricing estimation for audit runs
 // ============================================================================
 
-import type { ModelPricing, CostEstimate, PerBranchCostEstimate } from "./types";
+import type {
+  ModelPricing,
+  CostEstimate,
+  PerBranchCostEstimate,
+} from "./types";
 
 /** Pricing table: $ per million tokens */
 const PRICING: Record<string, ModelPricing> = {
@@ -273,8 +277,7 @@ export function estimatePerBranchCost(
     1_000_000;
 
   // Output cost per request at batch rate
-  const perRequestOutputCost =
-    (outputTokens * pricing.batchOutput) / 1_000_000;
+  const perRequestOutputCost = (outputTokens * pricing.batchOutput) / 1_000_000;
 
   // Per-policy attribution: sum across all branches for that policy
   const perPolicy = policyTokensList.map((p) => {
@@ -297,13 +300,16 @@ export function estimatePerBranchCost(
   const totalCacheWriteCost = perBranchCacheWriteCost * branchCount;
   const totalCacheReadCost = perBranchCacheReadCost * branchCount;
   const totalPolicyInputCost =
-    policyTokensList.reduce((sum, p) => sum + p.tokens, 0) *
-    branchCount *
-    pricing.batchInput /
+    (policyTokensList.reduce((sum, p) => sum + p.tokens, 0) *
+      branchCount *
+      pricing.batchInput) /
     1_000_000;
   const totalOutputCost = perRequestOutputCost * totalRequests;
   const totalBatchApiCost =
-    totalCacheWriteCost + totalCacheReadCost + totalPolicyInputCost + totalOutputCost;
+    totalCacheWriteCost +
+    totalCacheReadCost +
+    totalPolicyInputCost +
+    totalOutputCost;
 
   // No-cache reference: all tokens at standard input rate
   const totalInputTokensNc =
@@ -339,7 +345,9 @@ export function formatPerBranchEstimate(est: PerBranchCostEstimate): string {
   lines.push("  Per-policy breakdown:");
   for (const p of est.perPolicy) {
     const tokK = Math.round(p.policyTokens / 1000);
-    lines.push(`    ${p.policyName.padEnd(30)} ${tokK}K tokens  ${fmt(p.batchApiCost)}`);
+    lines.push(
+      `    ${p.policyName.padEnd(30)} ${tokK}K tokens  ${fmt(p.batchApiCost)}`,
+    );
   }
 
   lines.push("");

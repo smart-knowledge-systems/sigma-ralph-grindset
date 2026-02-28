@@ -32,21 +32,23 @@ function validateAuditResult(parsed: unknown): AuditResult {
 
   const raw = parsed as { issues: unknown[] };
   const validSeverities = new Set(["high", "medium", "low"]);
-  const issues = raw.issues.filter((item): item is AuditResult["issues"][number] => {
-    if (typeof item !== "object" || item === null) return false;
-    const o = item as Record<string, unknown>;
-    return (
-      typeof o.description === "string" &&
-      typeof o.rule === "string" &&
-      typeof o.severity === "string" &&
-      validSeverities.has(o.severity) &&
-      typeof o.suggestion === "string" &&
-      typeof o.policy === "string" &&
-      Array.isArray(o.files) &&
-      o.files.length >= 1 &&
-      o.files.every((f: unknown) => typeof f === "string")
-    );
-  });
+  const issues = raw.issues.filter(
+    (item): item is AuditResult["issues"][number] => {
+      if (typeof item !== "object" || item === null) return false;
+      const o = item as Record<string, unknown>;
+      return (
+        typeof o.description === "string" &&
+        typeof o.rule === "string" &&
+        typeof o.severity === "string" &&
+        validSeverities.has(o.severity) &&
+        typeof o.suggestion === "string" &&
+        typeof o.policy === "string" &&
+        Array.isArray(o.files) &&
+        o.files.length >= 1 &&
+        o.files.every((f: unknown) => typeof f === "string")
+      );
+    },
+  );
 
   if (issues.length < raw.issues.length) {
     log.warn(
@@ -336,9 +338,7 @@ export function buildBatchRequestForBranch(
 }
 
 /** Extract token usage from an API message usage object. */
-function extractUsage(
-  rawUsage: Record<string, unknown>,
-): TokenUsage {
+function extractUsage(rawUsage: Record<string, unknown>): TokenUsage {
   return {
     inputTokens: (rawUsage.input_tokens as number) ?? 0,
     outputTokens: (rawUsage.output_tokens as number) ?? 0,
@@ -379,34 +379,36 @@ export async function* auditViaBatchPerBranch(
     idToPolicy: Map<string, { branchPath: string; policyName: string }>;
   };
 
-  const batchSubmissions: Promise<BatchInfo>[] = branches.map(async (branch) => {
-    const idToPolicy = new Map<
-      string,
-      { branchPath: string; policyName: string }
-    >();
+  const batchSubmissions: Promise<BatchInfo>[] = branches.map(
+    async (branch) => {
+      const idToPolicy = new Map<
+        string,
+        { branchPath: string; policyName: string }
+      >();
 
-    const requests = policyNames.map((policyName) => {
-      const req = buildBatchRequestForBranch(
-        branch.path,
-        branch.files,
-        policyName,
-        config,
-      );
-      idToPolicy.set(req.custom_id, {
-        branchPath: branch.path,
-        policyName,
+      const requests = policyNames.map((policyName) => {
+        const req = buildBatchRequestForBranch(
+          branch.path,
+          branch.files,
+          policyName,
+          config,
+        );
+        idToPolicy.set(req.custom_id, {
+          branchPath: branch.path,
+          policyName,
+        });
+        return req;
       });
-      return req;
-    });
 
-    log.info(
-      `Submitting batch for branch ${branch.path}: ${requests.length} requests`,
-    );
-    const batch = await c.messages.batches.create({ requests });
-    log.info(`Batch created for ${branch.path}: ${batch.id}`);
+      log.info(
+        `Submitting batch for branch ${branch.path}: ${requests.length} requests`,
+      );
+      const batch = await c.messages.batches.create({ requests });
+      log.info(`Batch created for ${branch.path}: ${batch.id}`);
 
-    return { batchId: batch.id, idToPolicy };
-  });
+      return { batchId: batch.id, idToPolicy };
+    },
+  );
 
   // Submit all batches in parallel
   const allBatches = await Promise.all(batchSubmissions);
@@ -438,10 +440,7 @@ export async function* auditViaBatchPerBranch(
         counts.canceled +
         counts.processing;
       const done =
-        counts.succeeded +
-        counts.errored +
-        counts.expired +
-        counts.canceled;
+        counts.succeeded + counts.errored + counts.expired + counts.canceled;
 
       yield {
         type: "progress",

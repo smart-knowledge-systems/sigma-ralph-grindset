@@ -63,7 +63,11 @@ export function parseCliOutput(raw: string): AuditResult {
     if ("issues" in obj) return obj as unknown as AuditResult;
 
     // Strategy 3: CLI envelope where .result is an object with .issues
-    if (obj.result && typeof obj.result === "object" && !Array.isArray(obj.result)) {
+    if (
+      obj.result &&
+      typeof obj.result === "object" &&
+      !Array.isArray(obj.result)
+    ) {
       const res = obj.result as Record<string, unknown>;
       if ("issues" in res) return res as unknown as AuditResult;
     }
@@ -131,7 +135,8 @@ export function parseCliOutput(raw: string): AuditResult {
 function validateIssues(result: AuditResult): AuditResult {
   const validSeverities = new Set(["high", "medium", "low"]);
   const validated = result.issues.filter((issue) => {
-    if (typeof issue.description !== "string" || !issue.description) return false;
+    if (typeof issue.description !== "string" || !issue.description)
+      return false;
     if (typeof issue.rule !== "string") return false;
     if (!validSeverities.has(issue.severity)) {
       issue.severity = "medium";
@@ -169,9 +174,7 @@ export function parseNarrativeIssues(text: string): AuditIssue[] {
       continue;
 
     // Extract description from heading
-    const headingMatch = section.match(
-      /^###?\s+Issue\s+\d+:\s*(.+?)$/m,
-    );
+    const headingMatch = section.match(/^###?\s+Issue\s+\d+:\s*(.+?)$/m);
     const description = headingMatch?.[1]?.replace(/\*+/g, "").trim() ?? "";
 
     // Extract fields using **Label**: Value pattern
@@ -181,10 +184,11 @@ export function parseNarrativeIssues(text: string): AuditIssue[] {
     const filesMatch = section.match(/\*\*Files?\*\*[:\s]+(.+?)$/m);
 
     const rule = ruleMatch?.[1]?.replace(/[`*]/g, "").trim() ?? "";
-    const rawSeverity = severityMatch?.[1]?.replace(/[`*]/g, "").trim().toLowerCase() ?? "";
-    const severity = (["high", "medium", "low"].includes(rawSeverity)
-      ? rawSeverity
-      : "medium") as AuditIssue["severity"];
+    const rawSeverity =
+      severityMatch?.[1]?.replace(/[`*]/g, "").trim().toLowerCase() ?? "";
+    const severity = (
+      ["high", "medium", "low"].includes(rawSeverity) ? rawSeverity : "medium"
+    ) as AuditIssue["severity"];
     const policy = policyMatch?.[1]?.replace(/[`*]/g, "").trim() ?? "";
 
     // Parse files — could be comma-separated, backtick-wrapped
@@ -287,7 +291,9 @@ export async function auditViaCli(
 
   if (exitCode !== 0) {
     const errorType = `cli_exit_${exitCode}`;
-    log.error(`Claude CLI failed (exit ${exitCode}, ${durationMs}ms): ${stderr.slice(0, 200)}`);
+    log.error(
+      `Claude CLI failed (exit ${exitCode}, ${durationMs}ms): ${stderr.slice(0, 200)}`,
+    );
     throw Object.assign(new Error(`Claude CLI exit code ${exitCode}`), {
       errorType,
       stderr: stderr.slice(0, 500),

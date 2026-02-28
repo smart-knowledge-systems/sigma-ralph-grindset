@@ -262,10 +262,7 @@ async function main(): Promise<void> {
           }
         } else if (policies.length > 1) {
           // Multi-policy batch: compute upfront cost, single confirmation
-          const estimate = computePerBranchCostEstimate(
-            config,
-            policies,
-          );
+          const estimate = computePerBranchCostEstimate(config, policies);
 
           log.info(formatPerBranchEstimate(estimate));
           events.emit({

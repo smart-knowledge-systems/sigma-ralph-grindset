@@ -35,9 +35,7 @@ export function getFixFilesWithLoc(
        ORDER BY f.path`;
 
   const rows = (
-    policyFilter
-      ? d.prepare(sql).all(policyFilter)
-      : d.prepare(sql).all()
+    policyFilter ? d.prepare(sql).all(policyFilter) : d.prepare(sql).all()
   ) as Array<{ path: string }>;
 
   return rows.map((row) => {
@@ -47,7 +45,9 @@ export function getFixFilesWithLoc(
       try {
         loc = readFileSync(fullPath, "utf-8").split("\n").length;
       } catch (e) {
-        log.warn(`Failed to read file for LOC count: ${row.path} — ${e instanceof Error ? e.message : "unknown error"}`);
+        log.warn(
+          `Failed to read file for LOC count: ${row.path} — ${e instanceof Error ? e.message : "unknown error"}`,
+        );
       }
     }
     return { path: row.path, loc };

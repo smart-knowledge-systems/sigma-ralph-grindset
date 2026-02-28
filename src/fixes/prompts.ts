@@ -32,7 +32,9 @@ RULES:
         prompt += `\n--- ${policyName} ---\n\n${content}\n`;
       }
     } catch (e) {
-      log.warn(`Policy file not readable: ${policyName} — ${e instanceof Error ? e.message : "unknown error"}`);
+      log.warn(
+        `Policy file not readable: ${policyName} — ${e instanceof Error ? e.message : "unknown error"}`,
+      );
     }
   }
 

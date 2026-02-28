@@ -315,7 +315,10 @@ export function startServer(): { port: number; stop: () => Promise<void> } {
             typeof body.requestId !== "string"
           ) {
             return Response.json(
-              { error: "Invalid body: requires { approved: boolean, requestId: string }" },
+              {
+                error:
+                  "Invalid body: requires { approved: boolean, requestId: string }",
+              },
               {
                 status: 400,
                 headers: { "Access-Control-Allow-Origin": "*" },

@@ -56,12 +56,15 @@ export default function SummaryPanel({
         issues += branch.issueCount;
       }
     }
-    return { totalIssues: issues, totalBranches: branches, failedBranches: failed };
+    return {
+      totalIssues: issues,
+      totalBranches: branches,
+      failedBranches: failed,
+    };
   }, [audits]);
 
   const showAggregated =
-    costEstimateAggregated &&
-    costEstimateAggregated.perPolicy.length > 0;
+    costEstimateAggregated && costEstimateAggregated.perPolicy.length > 0;
 
   return (
     <div style={panel}>

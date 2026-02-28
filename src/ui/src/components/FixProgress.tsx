@@ -100,7 +100,9 @@ export default function FixProgress({ fix }: Props) {
         <div style={cardFooter}>
           <span style={{ color: "#2A9D8F" }}>&#x2713; {fix.fixed} fixed</span>
           {fix.failed > 0 && (
-            <span style={{ color: "#D63333" }}>&#x2717; {fix.failed} failed</span>
+            <span style={{ color: "#D63333" }}>
+              &#x2717; {fix.failed} failed
+            </span>
           )}
         </div>
       )}

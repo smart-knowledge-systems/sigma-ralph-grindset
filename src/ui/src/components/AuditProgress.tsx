@@ -82,7 +82,17 @@ export default function AuditProgress({ audits }: Props) {
                     {path}
                   </span>
                   <span style={fileBadge}>{branch.fileCount} files</span>
-                  <StatusBadge status={branch.status === "running" ? "running" : branch.status === "done" ? "done" : branch.status === "failed" ? "failed" : "pending"} />
+                  <StatusBadge
+                    status={
+                      branch.status === "running"
+                        ? "running"
+                        : branch.status === "done"
+                          ? "done"
+                          : branch.status === "failed"
+                            ? "failed"
+                            : "pending"
+                    }
+                  />
                   <span style={issueCount}>
                     {branch.status === "done" ? branch.issueCount : "\u2014"}
                   </span>
@@ -93,9 +103,13 @@ export default function AuditProgress({ audits }: Props) {
             {/* Footer summary */}
             {audit.processed > 0 && (
               <div style={cardFooter}>
-                <span style={{ color: "#2A9D8F" }}>&#x2713; {audit.succeeded}</span>
+                <span style={{ color: "#2A9D8F" }}>
+                  &#x2713; {audit.succeeded}
+                </span>
                 {audit.failed > 0 && (
-                  <span style={{ color: "#D63333" }}>&#x2717; {audit.failed}</span>
+                  <span style={{ color: "#D63333" }}>
+                    &#x2717; {audit.failed}
+                  </span>
                 )}
               </div>
             )}

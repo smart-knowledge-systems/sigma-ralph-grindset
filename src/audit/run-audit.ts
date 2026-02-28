@@ -5,7 +5,13 @@
 import { spawnSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
-import type { AuditConfig, AuditMode, Branch, CostEstimate, PerBranchCostEstimate } from "../types";
+import type {
+  AuditConfig,
+  AuditMode,
+  Branch,
+  CostEstimate,
+  PerBranchCostEstimate,
+} from "../types";
 import { log } from "../logging";
 import { events } from "../events";
 import { initDatabase, getCheckpointCommit } from "../db";
@@ -335,9 +341,7 @@ export async function runAudit(
       const systemTokens = estimateTokens(systemPrompt.length);
       const avgBranchChars =
         branchesWithFiles.reduce((sum, b) => {
-          return (
-            sum + b.files.reduce((s, f) => s + (Bun.file(f).size ?? 0), 0)
-          );
+          return sum + b.files.reduce((s, f) => s + (Bun.file(f).size ?? 0), 0);
         }, 0) / Math.max(branchesWithFiles.length, 1);
       const avgBranchTokens = estimateTokens(avgBranchChars);
 
