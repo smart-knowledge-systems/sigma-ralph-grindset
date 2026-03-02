@@ -78,16 +78,25 @@ function processDir(
   const hasSubs = hasSourceSubdirs(dir, config);
 
   if (hasSubs) {
-    // Has subdirectories — add flat-only entry if this dir has files
-    if (flatLoc > 0) {
-      branches.push({ raw: `${relPath} (flat)`, path: relPath, isFlat: true });
-      log.info(`  ${relPath} (flat) (flat: ${flatLoc} LOC)`);
-    }
+    // Check total LOC (flat + all subdirs) before deciding to split
+    const allFiles = findSourceFiles(dir, false, config);
+    const totalLoc = allFiles.length > 0 ? countLoc(allFiles) : 0;
 
-    // Recurse into subdirectories
-    log.info(`  ${relPath} - recursing into subdirectories`);
-    for (const subdir of getSourceSubdirs(dir, config)) {
-      processDir(subdir, config, branches);
+    if (totalLoc <= config.maxLoc) {
+      // Total fits in one branch — keep as a single non-flat branch
+      branches.push({ raw: relPath, path: relPath, isFlat: false });
+      log.info(`  ${relPath} (${totalLoc} LOC) - combined (under MAX_LOC)`);
+    } else {
+      // Too large — split into flat + subdirectories
+      if (flatLoc > 0) {
+        branches.push({ raw: `${relPath} (flat)`, path: relPath, isFlat: true });
+        log.info(`  ${relPath} (flat) (flat: ${flatLoc} LOC)`);
+      }
+
+      log.info(`  ${relPath} - recursing into subdirectories (${totalLoc} LOC > MAX_LOC ${config.maxLoc})`);
+      for (const subdir of getSourceSubdirs(dir, config)) {
+        processDir(subdir, config, branches);
+      }
     }
   } else {
     // Leaf directory
