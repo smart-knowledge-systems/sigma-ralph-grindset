@@ -168,9 +168,7 @@ export function validateAuditResult(parsed: unknown): AuditResult {
   }
 
   if (rejected.length > 0) {
-    log.warn(
-      `Filtered ${rejected.length} invalid issues from audit result`,
-    );
+    log.warn(`Filtered ${rejected.length} invalid issues from audit result`);
     for (const { item, reason } of rejected) {
       log.debug(`  Rejected (${reason}): ${JSON.stringify(item)}`);
     }

@@ -29,6 +29,7 @@ export function createInitialState(): UIState {
     costEstimate: null,
     costEstimateAggregated: null,
     costConfirmRequest: null,
+    apiKeyRequest: null,
     logs: [],
     startTime: new Date().toISOString(),
   };
@@ -279,6 +280,15 @@ export function reducer(state: UIState, event: ReducerAction): UIState {
     case "infra.cost.confirm.response":
       return { ...state, costConfirmRequest: null };
 
+    case "infra.apikey.request":
+      return {
+        ...state,
+        apiKeyRequest: {
+          requestId: event.requestId,
+          message: event.message,
+        },
+      };
+
     case "log":
       return {
         ...state,
@@ -385,6 +395,7 @@ function applySnapshot(state: UIState, s: HydrationSnapshot): UIState {
     costEstimate: s.costEstimate ?? null,
     costEstimateAggregated: s.costEstimateAggregated ?? null,
     costConfirmRequest: s.costConfirmRequest ?? null,
+    apiKeyRequest: s.apiKeyRequest ?? null,
     logs: [...state.logs, ...(s.logs ?? [])].slice(-500),
   };
 }

@@ -120,7 +120,8 @@ export const CONFIG_FIELDS: ConfigField[] = [
     label: "Diff ref",
     type: "string",
     default: "",
-    description: "Git ref to diff against when diff mode is enabled (e.g. HEAD~1, main)",
+    description:
+      "Git ref to diff against when diff mode is enabled (e.g. HEAD~1, main)",
     section: "defaults",
   },
   {
@@ -136,7 +137,8 @@ export const CONFIG_FIELDS: ConfigField[] = [
     label: "Dry run",
     type: "boolean",
     default: false,
-    description: "Show cost estimate and branch plan without executing the audit",
+    description:
+      "Show cost estimate and branch plan without executing the audit",
     section: "defaults",
   },
   {
@@ -152,7 +154,8 @@ export const CONFIG_FIELDS: ConfigField[] = [
     label: "Interactive fix",
     type: "boolean",
     default: false,
-    description: "Open Claude in interactive mode for fixes instead of headless",
+    description:
+      "Open Claude in interactive mode for fixes instead of headless",
     section: "defaults",
   },
   {
@@ -160,7 +163,8 @@ export const CONFIG_FIELDS: ConfigField[] = [
     label: "Skip commits",
     type: "boolean",
     default: false,
-    description: "Apply fixes without creating git commits (dangerous — changes are uncommitted)",
+    description:
+      "Apply fixes without creating git commits (dangerous — changes are uncommitted)",
     section: "defaults",
   },
 ];

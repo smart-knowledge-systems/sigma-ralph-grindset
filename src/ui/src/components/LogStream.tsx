@@ -17,9 +17,10 @@ interface Props {
   logs: LogEntry[];
 }
 
-const LEVELS = ["debug", "info", "warn", "error"] as const;
+const LEVELS = ["trace", "debug", "info", "warn", "error"] as const;
 
 const levelColors: Record<string, string> = {
+  trace: "#9B7DB8",
   debug: "#7A7568",
   info: "#D4C9A8",
   warn: "#FFD90F",
@@ -139,7 +140,12 @@ export default function LogStream({ logs }: Props) {
                 style={{
                   ...messageText,
                   color: levelColors[entry.level] ?? "#D4C9A8",
-                  opacity: entry.level === "debug" ? 0.6 : 1,
+                  opacity:
+                    entry.level === "trace"
+                      ? 0.45
+                      : entry.level === "debug"
+                        ? 0.6
+                        : 1,
                 }}
               >
                 {entry.message}

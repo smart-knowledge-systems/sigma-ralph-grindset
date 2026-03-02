@@ -106,6 +106,28 @@ export type PipelineEvent =
       requestId: string;
     }
   | {
+      type: "infra.cost.actual";
+      model: string;
+      actualCost: number;
+      estimatedCost: number;
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+        cacheCreationInputTokens: number;
+        cacheReadInputTokens: number;
+      };
+    }
+  | {
+      type: "infra.apikey.request";
+      requestId: string;
+      message: string;
+    }
+  | {
+      type: "infra.apikey.response";
+      requestId: string;
+      apiKey: string | null;
+    }
+  | {
       type: "log";
       level: string;
       message: string;

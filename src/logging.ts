@@ -7,12 +7,13 @@ import { resolve } from "path";
 import { randomUUID } from "crypto";
 import { events } from "./events";
 
-type LogLevel = "debug" | "info" | "warn" | "error";
+type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 /** Optional structured metadata attached to log entries for structured logging. */
 export type LogMeta = Record<string, unknown>;
 
 const LEVEL_NUM: Record<LogLevel, number> = {
+  trace: -1,
   debug: 0,
   info: 1,
   warn: 2,
@@ -20,6 +21,7 @@ const LEVEL_NUM: Record<LogLevel, number> = {
 };
 
 const LEVEL_COLORS: Record<LogLevel, string> = {
+  trace: "\x1b[2;35m", // dim magenta — distinguishes from debug
   debug: "\x1b[2m",
   info: "",
   warn: "\x1b[33m",
@@ -171,7 +173,7 @@ function write(level: LogLevel, msg: string, meta?: LogMeta): void {
 
   if (level === "error") errorCount++;
 
-  // Always write to file at debug level (includes structured metadata if present)
+  // Always write to file at all levels including trace (includes structured metadata if present)
   writeToFile(`[${level.toUpperCase()}]`, sanitized, ts, meta);
 
   // Emit to event bus (runId is attached automatically by the bus)
@@ -191,7 +193,12 @@ function write(level: LogLevel, msg: string, meta?: LogMeta): void {
   const prefix =
     level === "info" ? "" : `${color}[${level.toUpperCase()}]${RESET} `;
 
-  if (level === "error" || level === "warn" || level === "debug") {
+  if (
+    level === "error" ||
+    level === "warn" ||
+    level === "debug" ||
+    level === "trace"
+  ) {
     process.stderr.write(`${prefix}${sanitized}\n`);
   } else {
     process.stdout.write(`${prefix}${sanitized}\n`);
@@ -199,6 +206,7 @@ function write(level: LogLevel, msg: string, meta?: LogMeta): void {
 }
 
 export const log = {
+  trace: (msg: string, meta?: LogMeta) => write("trace", msg, meta),
   debug: (msg: string, meta?: LogMeta) => write("debug", msg, meta),
   info: (msg: string, meta?: LogMeta) => write("info", msg, meta),
   warn: (msg: string, meta?: LogMeta) => write("warn", msg, meta),

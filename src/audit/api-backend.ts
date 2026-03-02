@@ -13,16 +13,21 @@ import {
   buildUserPromptForPolicy,
 } from "./prompts";
 import { AUDIT_JSON_SCHEMA, validateAuditResult } from "./schema";
+import { getApiKey } from "./ensure-api-key";
 
 // ============================================================================
 // Shared helpers
 // ============================================================================
 
 let client: Anthropic | null = null;
+let clientKey: string | undefined;
 
 function getClient(): Anthropic {
-  if (!client) {
-    client = new Anthropic();
+  const key = getApiKey();
+  // Re-create the client if the key changed (e.g. ephemeral key was cleared)
+  if (!client || clientKey !== key) {
+    client = new Anthropic({ apiKey: key });
+    clientKey = key;
   }
   return client;
 }
@@ -314,13 +319,13 @@ export function buildBatchRequestForBranch(
   files: string[],
   policyName: string,
   config: AuditConfig,
+  useCaching: boolean = true,
 ): Anthropic.Messages.BatchCreateParams.Request {
   const model = resolveModelId(config.auditModel);
-  const systemBlocks = buildSystemPromptBlocksForBranch(
-    config,
-    branchPath,
-    files,
-  );
+  const rawBlocks = buildSystemPromptBlocksForBranch(config, branchPath, files);
+  const systemBlocks = useCaching
+    ? rawBlocks
+    : rawBlocks.map((b) => ({ type: b.type, text: b.text }));
   const userPrompt = buildUserPromptForPolicy(policyName, config);
 
   // custom_id format: a-{branchSlug}-{policySlug} (max 64 chars)
@@ -350,6 +355,7 @@ export async function* auditViaBatchPerBranch(
   branches: Array<{ path: string; files: string[] }>,
   policyNames: string[],
   config: AuditConfig,
+  useCaching: boolean = true,
 ): AsyncGenerator<{
   type: "progress" | "result" | "complete";
   branchPath?: string;
@@ -380,6 +386,7 @@ export async function* auditViaBatchPerBranch(
           branch.files,
           policyName,
           config,
+          useCaching,
         );
         idToPolicy.set(req.custom_id, {
           branchPath: branch.path,

@@ -80,6 +80,10 @@ interface AccumulatedState {
     };
     requestId: string;
   } | null;
+  apiKeyRequest: {
+    requestId: string;
+    message: string;
+  } | null;
   logs: Array<{ level: string; message: string; timestamp: string }>;
   startTime: string;
 }
@@ -102,6 +106,7 @@ function createInitialState(): AccumulatedState {
     costEstimate: null,
     costEstimateAggregated: null,
     costConfirmRequest: null,
+    apiKeyRequest: null,
     logs: [],
     startTime: new Date().toISOString(),
   };
@@ -236,6 +241,15 @@ function applyEvent(state: AccumulatedState, event: PipelineEvent): void {
     case "infra.cost.confirm.response":
       state.costConfirmRequest = null;
       break;
+    case "infra.apikey.request":
+      state.apiKeyRequest = {
+        requestId: event.requestId,
+        message: event.message,
+      };
+      break;
+    case "infra.apikey.response":
+      state.apiKeyRequest = null;
+      break;
     case "log":
       // Keep last 500 log lines for state hydration
       state.logs.push({
@@ -259,6 +273,8 @@ export function startServer(): { port: number; stop: () => Promise<void> } {
   // Subscribe to all events and accumulate state
   const unsub = events.onAny((event) => {
     applyEvent(state, event);
+    // Never broadcast API key responses — the key must not leave the server
+    if (event.type === "infra.apikey.response") return;
     const data = JSON.stringify(event);
     for (const controller of sseClients) {
       try {
@@ -337,6 +353,54 @@ export function startServer(): { port: number; stop: () => Promise<void> } {
               headers: {
                 "Access-Control-Allow-Origin": "*",
               },
+            },
+          );
+        },
+        OPTIONS() {
+          return new Response(null, {
+            status: 204,
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Methods": "POST, OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type",
+            },
+          });
+        },
+      },
+
+      "/api/apikey": {
+        async POST(req: Request) {
+          const body = await req.json();
+          if (
+            !body ||
+            typeof body !== "object" ||
+            typeof body.requestId !== "string" ||
+            body.requestId.length === 0
+          ) {
+            return Response.json(
+              {
+                error:
+                  "Invalid body: requires { requestId: string, apiKey?: string }",
+              },
+              {
+                status: 400,
+                headers: { "Access-Control-Allow-Origin": "*" },
+              },
+            );
+          }
+          const apiKey =
+            typeof body.apiKey === "string" && body.apiKey.length > 0
+              ? body.apiKey
+              : null;
+          events.emit({
+            type: "infra.apikey.response",
+            requestId: body.requestId,
+            apiKey,
+          });
+          return Response.json(
+            { ok: true },
+            {
+              headers: { "Access-Control-Allow-Origin": "*" },
             },
           );
         },

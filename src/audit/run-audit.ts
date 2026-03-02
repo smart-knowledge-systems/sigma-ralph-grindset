@@ -42,8 +42,10 @@ import {
   estimateTokens,
   estimatePerBranchCost,
   formatPerBranchEstimate,
+  resolveModelId,
 } from "../pricing";
 import { buildSystemPrompt } from "./prompts";
+import { ensureApiKey, clearEphemeralApiKey } from "./ensure-api-key";
 import { randomUUID } from "crypto";
 
 // ============================================================================
@@ -272,10 +274,14 @@ export async function waitForConfirmation(requestId: string): Promise<boolean> {
   });
 }
 
-/** Load branches and their files, filtering out empty/missing ones. */
+/** Load branches and their files, filtering out empty/missing ones.
+ *  When maxLoc is provided, branches exceeding the limit are split into
+ *  multiple entries with suffixed paths (e.g. "src/components [batch 1]").
+ */
 function loadBranchesWithFiles(
   config: AuditConfig,
   branches: Branch[],
+  maxLoc?: number,
 ): Array<{ path: string; files: string[] }> {
   const result: Array<{ path: string; files: string[] }> = [];
   for (const branch of branches) {
@@ -283,7 +289,16 @@ function loadBranchesWithFiles(
     if (!existsSync(fullPath)) continue;
     const files = findSourceFiles(fullPath, branch.isFlat, config);
     if (files.length === 0) continue;
-    result.push({ path: branch.path, files });
+
+    if (maxLoc && countLoc(files) > maxLoc) {
+      const batches = batchFilesForAudit(files, maxLoc);
+      for (let i = 0; i < batches.length; i++) {
+        const suffix = batches.length > 1 ? ` [batch ${i + 1}]` : "";
+        result.push({ path: `${branch.path}${suffix}`, files: batches[i]! });
+      }
+    } else {
+      result.push({ path: branch.path, files });
+    }
   }
   return result;
 }
@@ -315,6 +330,11 @@ async function processBatchEvents(
     if (event.type === "complete") {
       log.info(event.message!);
       if (event.totalUsage) {
+        const actualCost = computeActualCost(
+          config.auditModel,
+          event.totalUsage,
+          true,
+        );
         log.info(
           formatActualCost(
             config.auditModel,
@@ -323,6 +343,13 @@ async function processBatchEvents(
             estimatedCost,
           ),
         );
+        events.emit({
+          type: "infra.cost.actual",
+          model: resolveModelId(config.auditModel),
+          actualCost,
+          estimatedCost,
+          usage: event.totalUsage,
+        });
       }
     } else if (event.type === "progress") {
       if (seenProgressMsgs.has(event.message!)) {
@@ -373,6 +400,15 @@ async function runDiffMode(
   policyLabel: string,
 ): Promise<AuditCounters> {
   const counters: AuditCounters = { processed: 0, succeeded: 0, failed: 0 };
+
+  if (opts.mode !== "cli") {
+    const hasKey = await ensureApiKey();
+    if (!hasKey) {
+      log.info("Audit aborted — no API key provided.");
+      return counters;
+    }
+  }
+
   const effectiveMaxLoc = opts.maxLoc ?? config.maxLoc;
 
   log.info(
@@ -434,20 +470,12 @@ async function runBatchMode(
     return counters;
   }
 
-  const branchesWithFiles = loadBranchesWithFiles(config, auditBranches);
-
-  // Validate API key before submitting
-  if (!process.env.ANTHROPIC_API_KEY) {
-    log.error("ANTHROPIC_API_KEY not set.");
-    log.error("");
-    log.error("  Option 1: Set your API key:");
-    log.error("    export ANTHROPIC_API_KEY=<your-api-key>");
-    log.error("");
-    log.error("  Option 2: Use the Claude CLI instead:");
-    log.error("    bun audit --cli");
-    log.error("    (requires `claude` CLI installed)");
-    process.exit(1);
-  }
+  const effectiveMaxLoc = opts.maxLoc ?? config.maxLoc;
+  const branchesWithFiles = loadBranchesWithFiles(
+    config,
+    auditBranches,
+    effectiveMaxLoc,
+  );
 
   if (policyNames.length > 1) {
     return runPerBranchBatch(
@@ -523,12 +551,24 @@ async function runPerBranchBatch(
     }
   }
 
+  const hasKey = await ensureApiKey();
+  if (!hasKey) {
+    log.info("Audit aborted — no API key provided.");
+    return counters;
+  }
+
+  const useCaching =
+    perBranchEstimate.totalBatchApiCost < perBranchEstimate.totalNoCacheCost;
+  const estimatedCost = useCaching
+    ? perBranchEstimate.totalBatchApiCost
+    : perBranchEstimate.totalNoCacheCost;
+
   const { auditViaBatchPerBranch } = await import("./api-backend");
   await processBatchEvents(
-    auditViaBatchPerBranch(branchesWithFiles, policyNames, config),
+    auditViaBatchPerBranch(branchesWithFiles, policyNames, config, useCaching),
     config,
     policyLabel,
-    perBranchEstimate.totalBatchApiCost,
+    estimatedCost,
     counters,
   );
 
@@ -591,6 +631,12 @@ async function runCombinedBatch(
     }
   }
 
+  const hasKey = await ensureApiKey();
+  if (!hasKey) {
+    log.info("Audit aborted — no API key provided.");
+    return counters;
+  }
+
   const useCaching = estimate.batchCachingEnabled;
   const { auditViaBatch } = await import("./api-backend");
   await processBatchEvents(
@@ -613,6 +659,15 @@ async function runNormalMode(
   policyLabel: string,
 ): Promise<AuditCounters> {
   const counters: AuditCounters = { processed: 0, succeeded: 0, failed: 0 };
+
+  if (opts.mode !== "cli") {
+    const hasKey = await ensureApiKey();
+    if (!hasKey) {
+      log.info("Audit aborted — no API key provided.");
+      return counters;
+    }
+  }
+
   const effectiveMaxLoc = opts.maxLoc ?? config.maxLoc;
 
   const branches = loadBranches(config);
@@ -797,10 +852,11 @@ export async function runAudit(
   let counters: AuditCounters;
   if (opts.diffMode) {
     counters = await runDiffMode(config, opts, policyNames, policyLabel);
-  } else if (opts.mode === "batch") {
-    counters = await runBatchMode(config, opts, policyNames, policyLabel);
-  } else {
+  } else if (opts.mode === "cli") {
     counters = await runNormalMode(config, opts, policyNames, policyLabel);
+  } else {
+    // Both "api" and "batch" use batch processing
+    counters = await runBatchMode(config, opts, policyNames, policyLabel);
   }
 
   // Summary
@@ -819,6 +875,9 @@ export async function runAudit(
     succeeded: counters.succeeded,
     failed: counters.failed,
   });
+
+  // Scrub ephemeral key so it doesn't leak into later stages or re-runs
+  clearEphemeralApiKey();
 
   return counters;
 }

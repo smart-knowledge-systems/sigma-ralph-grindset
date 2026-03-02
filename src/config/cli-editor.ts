@@ -130,10 +130,26 @@ export async function runCliConfig(auditDir: string): Promise<void> {
     header: string;
     description: string;
   }> = [
-    { key: "paths", header: "Paths", description: "Where to scan and what file types to include" },
-    { key: "limits", header: "Limits", description: "LOC thresholds for branch splitting and fix batching" },
-    { key: "models", header: "Models", description: "Which Claude model to use for each pipeline stage" },
-    { key: "defaults", header: "Default Behavior", description: "CLI flags that apply when not explicitly overridden" },
+    {
+      key: "paths",
+      header: "Paths",
+      description: "Where to scan and what file types to include",
+    },
+    {
+      key: "limits",
+      header: "Limits",
+      description: "LOC thresholds for branch splitting and fix batching",
+    },
+    {
+      key: "models",
+      header: "Models",
+      description: "Which Claude model to use for each pipeline stage",
+    },
+    {
+      key: "defaults",
+      header: "Default Behavior",
+      description: "CLI flags that apply when not explicitly overridden",
+    },
   ];
 
   // Special handling for PROJECT_ROOT
