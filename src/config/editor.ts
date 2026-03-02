@@ -104,7 +104,7 @@ export const CONFIG_FIELDS: ConfigField[] = [
     type: "enum",
     options: ["api", "cli"],
     default: "api",
-    description: "Audit backend (--cli to override)",
+    description: "Use Claude CLI (claude -p) instead of Batch API",
     section: "defaults",
   },
   {
@@ -112,7 +112,7 @@ export const CONFIG_FIELDS: ConfigField[] = [
     label: "Diff mode",
     type: "boolean",
     default: false,
-    description: "--diff: only audit changed files",
+    description: "Audit only files changed since the diff ref",
     section: "defaults",
   },
   {
@@ -120,7 +120,7 @@ export const CONFIG_FIELDS: ConfigField[] = [
     label: "Diff ref",
     type: "string",
     default: "",
-    description: "--diff [ref]: default git ref (e.g. HEAD~1, main)",
+    description: "Git ref to diff against when diff mode is enabled (e.g. HEAD~1, main)",
     section: "defaults",
   },
   {
@@ -128,7 +128,7 @@ export const CONFIG_FIELDS: ConfigField[] = [
     label: "Force all",
     type: "boolean",
     default: false,
-    description: "--all: ignore checkpoints, full audit",
+    description: "Ignore checkpoints and run a full audit of all branches",
     section: "defaults",
   },
   {
@@ -136,7 +136,7 @@ export const CONFIG_FIELDS: ConfigField[] = [
     label: "Dry run",
     type: "boolean",
     default: false,
-    description: "--dry-run: show estimate without executing",
+    description: "Show cost estimate and branch plan without executing the audit",
     section: "defaults",
   },
   {
@@ -144,7 +144,7 @@ export const CONFIG_FIELDS: ConfigField[] = [
     label: "Stdout only",
     type: "boolean",
     default: false,
-    description: "--stdout: skip browser UI",
+    description: "Log to stdout only, don't open the browser progress UI",
     section: "defaults",
   },
   {
@@ -152,7 +152,7 @@ export const CONFIG_FIELDS: ConfigField[] = [
     label: "Interactive fix",
     type: "boolean",
     default: false,
-    description: "--interactive: open Claude interactively for fixes",
+    description: "Open Claude in interactive mode for fixes instead of headless",
     section: "defaults",
   },
   {
@@ -160,7 +160,7 @@ export const CONFIG_FIELDS: ConfigField[] = [
     label: "Skip commits",
     type: "boolean",
     default: false,
-    description: "--dangerously-skip-commits: skip git commits in fix",
+    description: "Apply fixes without creating git commits (dangerous — changes are uncommitted)",
     section: "defaults",
   },
 ];

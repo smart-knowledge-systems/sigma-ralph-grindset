@@ -125,11 +125,15 @@ export async function runCliConfig(auditDir: string): Promise<void> {
     "  Tip: Delete audit.conf to restore defaults from audit.conf.default.",
   );
 
-  const sections: Array<{ key: ConfigField["section"]; header: string }> = [
-    { key: "paths", header: "Paths" },
-    { key: "limits", header: "Limits" },
-    { key: "models", header: "Models" },
-    { key: "defaults", header: "Default Behavior" },
+  const sections: Array<{
+    key: ConfigField["section"];
+    header: string;
+    description: string;
+  }> = [
+    { key: "paths", header: "Paths", description: "Where to scan and what file types to include" },
+    { key: "limits", header: "Limits", description: "LOC thresholds for branch splitting and fix batching" },
+    { key: "models", header: "Models", description: "Which Claude model to use for each pipeline stage" },
+    { key: "defaults", header: "Default Behavior", description: "CLI flags that apply when not explicitly overridden" },
   ];
 
   // Special handling for PROJECT_ROOT
@@ -170,8 +174,12 @@ export async function runCliConfig(auditDir: string): Promise<void> {
 
     console.log("");
     console.log(`--- ${section.header} ---`);
+    console.log(`  ${section.description}`);
 
     for (const field of filteredFields) {
+      if (field.section === "defaults") {
+        console.log(`    ${field.description}`);
+      }
       values[field.key] = (await promptField(rl, field, values[field.key])) as
         | string
         | string[]

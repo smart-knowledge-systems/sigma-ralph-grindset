@@ -130,11 +130,12 @@ export default function ConfigApp() {
   const sections: Array<{
     key: ConfigField["section"];
     header: string;
+    description: string;
   }> = [
-    { key: "paths", header: "Project Setup" },
-    { key: "limits", header: "Limits" },
-    { key: "models", header: "Models" },
-    { key: "defaults", header: "Default Behavior" },
+    { key: "paths", header: "Project Setup", description: "Where to scan and what file types to include" },
+    { key: "limits", header: "Limits", description: "LOC thresholds for branch splitting and fix batching" },
+    { key: "models", header: "Models", description: "Which Claude model to use for each pipeline stage" },
+    { key: "defaults", header: "Default Behavior", description: "CLI flags that apply when not explicitly overridden" },
   ];
 
   const rootMode =
@@ -164,6 +165,7 @@ export default function ConfigApp() {
           return (
             <div key={section.key} style={card}>
               <div style={sectionTitle}>{section.header}</div>
+              <div style={sectionDesc}>{section.description}</div>
 
               {sectionFields.map((field) => {
                 // Special: PROJECT_ROOT as radio group
@@ -391,6 +393,12 @@ const sectionTitle: CSSProperties = {
   color: "#8C8370",
   letterSpacing: 1,
   textTransform: "uppercase" as const,
+  marginBottom: 4,
+};
+
+const sectionDesc: CSSProperties = {
+  fontSize: 12,
+  color: "#A89F91",
   marginBottom: 16,
 };
 
