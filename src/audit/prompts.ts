@@ -24,6 +24,16 @@ Review the provided code and identify violations of the guidelines below. For ea
 5. List all affected files
 6. Tag with the specific policy name that was violated (from the guideline sections below)
 
+## Required JSON Fields (use these exact names)
+- "description": string — what the problem is
+- "rule": string — the specific rule name violated
+- "severity": "high" | "medium" | "low"
+- "suggestion": string — how to fix it
+- "policy": string — the policy name
+- "files": string[] — affected file paths (at least one)
+
+Do NOT use alternative field names like "affected_files", "rule_violations", "fix", "title", or "id".
+
 ## Severity Mapping
 - **high**: Performance problems, bugs, incorrect patterns that could break functionality
 - **medium**: Maintainability issues, code smells, suboptimal patterns
