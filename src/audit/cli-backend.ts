@@ -297,8 +297,12 @@ export function parseCliOutput(raw: string): AuditResult {
     (parsed as Record<string, unknown>).is_error === false &&
     typeof (parsed as Record<string, unknown>).result === "string"
   ) {
+    const resultStr = (parsed as Record<string, unknown>).result as string;
     log.debug(
       "Successful CLI result with no extractable issues — treating as clean",
+    );
+    log.trace(
+      `Unextractable result string (${resultStr.length} chars):\n${resultStr}`,
     );
     return { issues: [] };
   }
@@ -458,6 +462,7 @@ export async function auditViaCli(
   }
 
   log.debug(`Claude CLI completed in ${durationMs}ms`);
+  log.trace(`Claude CLI raw stdout:\n${stdout}`);
 
   try {
     const result = parseCliOutput(stdout);

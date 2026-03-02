@@ -3,6 +3,7 @@ import { useSSE } from "./hooks/useSSE";
 import PipelinePhases from "./components/PipelinePhases";
 import AuditProgress from "./components/AuditProgress";
 import FixProgress from "./components/FixProgress";
+import ApiKeyPrompt from "./components/ApiKeyPrompt";
 import CostConfirmation from "./components/CostConfirmation";
 import SummaryPanel from "./components/SummaryPanel";
 import LogStream from "./components/LogStream";
@@ -61,6 +62,12 @@ export default function App() {
       <div style={mainGrid}>
         {/* Center content */}
         <div style={centerCol}>
+          {state.apiKeyRequest && (
+            <ApiKeyPrompt
+              requestId={state.apiKeyRequest.requestId}
+              message={state.apiKeyRequest.message}
+            />
+          )}
           {state.costConfirmRequest && (
             <CostConfirmation
               estimate={state.costConfirmRequest.estimate}

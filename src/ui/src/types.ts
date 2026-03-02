@@ -82,6 +82,11 @@ export type PipelineEvent =
       approved: boolean;
       requestId: string;
     }
+  | {
+      type: "infra.apikey.request";
+      requestId: string;
+      message: string;
+    }
   | { type: "log"; level: string; message: string; timestamp: string };
 
 export interface BranchState {
@@ -157,6 +162,7 @@ export interface UIState {
   costEstimate: CostEstimate | null;
   costEstimateAggregated: AggregatedCostEstimate | null;
   costConfirmRequest: { estimate: CostEstimate; requestId: string } | null;
+  apiKeyRequest: { requestId: string; message: string } | null;
   logs: LogEntry[];
   startTime: string;
 }
@@ -207,6 +213,10 @@ export interface HydrationSnapshot {
   costConfirmRequest?: {
     estimate: CostEstimate;
     requestId: string;
+  } | null;
+  apiKeyRequest?: {
+    requestId: string;
+    message: string;
   } | null;
   logs?: LogEntry[];
 }

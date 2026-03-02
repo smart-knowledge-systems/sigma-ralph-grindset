@@ -106,6 +106,16 @@ export type PipelineEvent =
       requestId: string;
     }
   | {
+      type: "infra.apikey.request";
+      requestId: string;
+      message: string;
+    }
+  | {
+      type: "infra.apikey.response";
+      requestId: string;
+      apiKey: string | null;
+    }
+  | {
       type: "log";
       level: string;
       message: string;

@@ -194,12 +194,14 @@ async function main(): Promise<void> {
     config.maxLoc = opts.maxLoc;
   }
 
-  // Determine mode: explicit --cli flag > config default > "batch"
+  // Determine mode: explicit CLI flags > config default > "batch"
   const mode: AuditMode = has("--cli")
     ? "cli"
-    : config.defaultMode === "cli"
-      ? "cli"
-      : "batch";
+    : has("--api")
+      ? "api"
+      : has("--batch")
+        ? "batch"
+        : config.defaultMode;
 
   // Handle config command before initializing pipeline infrastructure
   if (opts.command === "config") {
@@ -318,7 +320,7 @@ async function main(): Promise<void> {
             break;
           }
 
-          // Run with pre-approved cost
+          // Run with pre-approved cost (API key checked inside mode runner)
           await runAudit(config, {
             policies,
             forceAll: opts.forceAll,

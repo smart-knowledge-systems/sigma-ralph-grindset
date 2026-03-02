@@ -16,6 +16,7 @@
     "format": "bunx prettier --write -l --cache --cache-location node_modules/.cache/prettier/ src/",
     "format:check": "bunx prettier --check --cache --cache-location node_modules/.cache/prettier/ src/",
     "format:legacy": "shfmt -w -i 4 -ci legacy/*.sh",
+    "setup": "bun install && cd src/ui && bun install && cd ../.. && bun run build:ui",
     "build:ui": "cd src/ui && bunx vite build",
     "build:config-ui": "cd src/ui && bunx vite build --config vite.config.config.ts"
   },

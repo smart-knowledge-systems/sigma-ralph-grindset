@@ -89,11 +89,17 @@ function processDir(
     } else {
       // Too large — split into flat + subdirectories
       if (flatLoc > 0) {
-        branches.push({ raw: `${relPath} (flat)`, path: relPath, isFlat: true });
+        branches.push({
+          raw: `${relPath} (flat)`,
+          path: relPath,
+          isFlat: true,
+        });
         log.info(`  ${relPath} (flat) (flat: ${flatLoc} LOC)`);
       }
 
-      log.info(`  ${relPath} - recursing into subdirectories (${totalLoc} LOC > MAX_LOC ${config.maxLoc})`);
+      log.info(
+        `  ${relPath} - recursing into subdirectories (${totalLoc} LOC > MAX_LOC ${config.maxLoc})`,
+      );
       for (const subdir of getSourceSubdirs(dir, config)) {
         processDir(subdir, config, branches);
       }

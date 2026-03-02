@@ -13,16 +13,21 @@ import {
   buildUserPromptForPolicy,
 } from "./prompts";
 import { AUDIT_JSON_SCHEMA, validateAuditResult } from "./schema";
+import { getApiKey } from "./ensure-api-key";
 
 // ============================================================================
 // Shared helpers
 // ============================================================================
 
 let client: Anthropic | null = null;
+let clientKey: string | undefined;
 
 function getClient(): Anthropic {
-  if (!client) {
-    client = new Anthropic();
+  const key = getApiKey();
+  // Re-create the client if the key changed (e.g. ephemeral key was cleared)
+  if (!client || clientKey !== key) {
+    client = new Anthropic({ apiKey: key });
+    clientKey = key;
   }
   return client;
 }

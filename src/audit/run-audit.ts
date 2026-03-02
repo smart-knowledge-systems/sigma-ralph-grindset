@@ -44,6 +44,7 @@ import {
   formatPerBranchEstimate,
 } from "../pricing";
 import { buildSystemPrompt } from "./prompts";
+import { ensureApiKey, clearEphemeralApiKey } from "./ensure-api-key";
 import { randomUUID } from "crypto";
 
 // ============================================================================
@@ -373,6 +374,15 @@ async function runDiffMode(
   policyLabel: string,
 ): Promise<AuditCounters> {
   const counters: AuditCounters = { processed: 0, succeeded: 0, failed: 0 };
+
+  if (opts.mode !== "cli") {
+    const hasKey = await ensureApiKey();
+    if (!hasKey) {
+      log.info("Audit aborted — no API key provided.");
+      return counters;
+    }
+  }
+
   const effectiveMaxLoc = opts.maxLoc ?? config.maxLoc;
 
   log.info(
@@ -435,19 +445,6 @@ async function runBatchMode(
   }
 
   const branchesWithFiles = loadBranchesWithFiles(config, auditBranches);
-
-  // Validate API key before submitting
-  if (!process.env.ANTHROPIC_API_KEY) {
-    log.error("ANTHROPIC_API_KEY not set.");
-    log.error("");
-    log.error("  Option 1: Set your API key:");
-    log.error("    export ANTHROPIC_API_KEY=<your-api-key>");
-    log.error("");
-    log.error("  Option 2: Use the Claude CLI instead:");
-    log.error("    bun audit --cli");
-    log.error("    (requires `claude` CLI installed)");
-    process.exit(1);
-  }
 
   if (policyNames.length > 1) {
     return runPerBranchBatch(
@@ -523,6 +520,12 @@ async function runPerBranchBatch(
     }
   }
 
+  const hasKey = await ensureApiKey();
+  if (!hasKey) {
+    log.info("Audit aborted — no API key provided.");
+    return counters;
+  }
+
   const { auditViaBatchPerBranch } = await import("./api-backend");
   await processBatchEvents(
     auditViaBatchPerBranch(branchesWithFiles, policyNames, config),
@@ -591,6 +594,12 @@ async function runCombinedBatch(
     }
   }
 
+  const hasKey = await ensureApiKey();
+  if (!hasKey) {
+    log.info("Audit aborted — no API key provided.");
+    return counters;
+  }
+
   const useCaching = estimate.batchCachingEnabled;
   const { auditViaBatch } = await import("./api-backend");
   await processBatchEvents(
@@ -613,6 +622,15 @@ async function runNormalMode(
   policyLabel: string,
 ): Promise<AuditCounters> {
   const counters: AuditCounters = { processed: 0, succeeded: 0, failed: 0 };
+
+  if (opts.mode !== "cli") {
+    const hasKey = await ensureApiKey();
+    if (!hasKey) {
+      log.info("Audit aborted — no API key provided.");
+      return counters;
+    }
+  }
+
   const effectiveMaxLoc = opts.maxLoc ?? config.maxLoc;
 
   const branches = loadBranches(config);
@@ -819,6 +837,9 @@ export async function runAudit(
     succeeded: counters.succeeded,
     failed: counters.failed,
   });
+
+  // Scrub ephemeral key so it doesn't leak into later stages or re-runs
+  clearEphemeralApiKey();
 
   return counters;
 }

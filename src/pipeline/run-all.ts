@@ -98,7 +98,7 @@ export async function runPipeline(
         .stdout.toString()
         .trim() || null;
 
-    // Step 2: Run audit
+    // Step 2: Run audit (API key checked inside mode runners, after cost approval)
     events.emit({
       type: "infra.pipeline.phase",
       phase: "audit",
