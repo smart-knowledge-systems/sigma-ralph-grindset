@@ -18,7 +18,6 @@ import { computeActualCost } from "../pricing";
 import { countLoc } from "../branches/scanner";
 import { parseFileRef } from "../branches/scanner";
 import { auditViaCli } from "./cli-backend";
-import { auditViaApi } from "./api-backend";
 
 export interface ProcessBranchResult {
   success: boolean;
@@ -81,6 +80,7 @@ export async function processBranch(
       );
       result = cliResult.result;
     } else {
+      const { auditViaApi } = await import("./api-backend");
       const apiResult = await auditViaApi(
         branchPath,
         files,

@@ -25,7 +25,6 @@ import {
   isExcludedPath,
 } from "../branches/scanner";
 import { processBranch } from "./process-branch";
-import { auditViaBatch, auditViaBatchPerBranch } from "./api-backend";
 import {
   insertScan,
   updateScanStatus,
@@ -524,6 +523,7 @@ async function runPerBranchBatch(
     }
   }
 
+  const { auditViaBatchPerBranch } = await import("./api-backend");
   await processBatchEvents(
     auditViaBatchPerBranch(branchesWithFiles, policyNames, config),
     config,
@@ -592,6 +592,7 @@ async function runCombinedBatch(
   }
 
   const useCaching = estimate.batchCachingEnabled;
+  const { auditViaBatch } = await import("./api-backend");
   await processBatchEvents(
     auditViaBatch(branchesWithFiles, policyNames, config, useCaching),
     config,
