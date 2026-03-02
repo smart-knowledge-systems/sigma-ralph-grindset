@@ -22,6 +22,9 @@ const JSON_CODE_FENCE_RE =
 /** Matches bare JSON containing an "issues" array. */
 const JSON_BARE_RE = /(\{\s*"issues"\s*:\s*\[[\s\S]*\})/;
 
+/** Matches bare JSON containing "findings" or "violations" arrays (alternatives to "issues"). */
+const JSON_ALT_RE = /(\{\s*"(?:findings|violations)"\s*:\s*\[[\s\S]*\})/;
+
 /** Splits text on issue headings (### Issue N: or **Issue N:). */
 const ISSUE_HEADING_SPLIT_RE =
   /(?=###?\s+Issue\s+\d+[:\s]|\*\*Issue\s+\d+[:\s])/i;
@@ -69,14 +72,31 @@ export class ParseError extends Error {
 // ============================================================================
 
 /**
+ * Normalize objects that use alternative key names for the issues array.
+ * Claude sometimes responds with "findings" or "violations" instead of "issues".
+ */
+function normalizeIssueKeys(obj: Record<string, unknown>): boolean {
+  if ("issues" in obj) return true;
+  for (const alt of ["findings", "violations"] as const) {
+    if (alt in obj && Array.isArray(obj[alt])) {
+      obj.issues = obj[alt];
+      delete obj[alt];
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Try to extract a JSON object with an `issues` array from a string.
  * Handles raw JSON and JSON embedded in markdown code fences.
+ * Also recognizes alternative key names like "findings" and "violations".
  */
 function extractIssuesFromString(text: string): AuditResult | null {
   // Try direct parse first
   try {
     const obj = JSON.parse(text);
-    if (obj && typeof obj === "object" && "issues" in obj) {
+    if (obj && typeof obj === "object" && normalizeIssueKeys(obj)) {
       return validateAuditResult(obj);
     }
   } catch {
@@ -84,12 +104,12 @@ function extractIssuesFromString(text: string): AuditResult | null {
   }
 
   // Look for JSON in markdown code fences or bare {...}
-  for (const re of [JSON_CODE_FENCE_RE, JSON_BARE_RE]) {
+  for (const re of [JSON_CODE_FENCE_RE, JSON_BARE_RE, JSON_ALT_RE]) {
     const m = text.match(re);
     if (m?.[1]) {
       try {
         const obj = JSON.parse(m[1]);
-        if (obj && typeof obj === "object" && "issues" in obj) {
+        if (obj && typeof obj === "object" && normalizeIssueKeys(obj)) {
           return validateAuditResult(obj);
         }
       } catch {
@@ -264,6 +284,24 @@ export function parseCliOutput(raw: string): AuditResult {
   // Last resort: narrative markdown
   const narrative = parseNarrativeFallback(parsed, raw);
   if (narrative) return narrative;
+
+  // If the CLI envelope indicates a successful, non-error result but no issues
+  // were extractable, the model found no violations. Return empty issues rather
+  // than failing — this happens when --json-schema is ignored and the model
+  // responds with pure narrative like "No violations detected".
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    !Array.isArray(parsed) &&
+    (parsed as Record<string, unknown>).type === "result" &&
+    (parsed as Record<string, unknown>).is_error === false &&
+    typeof (parsed as Record<string, unknown>).result === "string"
+  ) {
+    log.debug(
+      "Successful CLI result with no extractable issues — treating as clean",
+    );
+    return { issues: [] };
+  }
 
   throw new ParseError("Cannot extract issues from CLI output", raw);
 }

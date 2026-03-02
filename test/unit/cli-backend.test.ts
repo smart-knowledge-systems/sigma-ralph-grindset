@@ -144,7 +144,7 @@ describe("parseCliOutput", () => {
     expect(() => parseCliOutput("not json")).toThrow(ParseError);
   });
 
-  test("throws ParseError when no issues found", () => {
+  test("throws ParseError when output has no recognizable structure", () => {
     expect(() => parseCliOutput(JSON.stringify({ foo: "bar" }))).toThrow(
       ParseError,
     );
@@ -188,12 +188,43 @@ describe("parseCliOutput", () => {
     expect(result.issues[1].files).toEqual(["src/logging.ts", "src/index.ts"]);
   });
 
-  test("throws ParseError for CLI envelope with no issues found", () => {
+  test("returns empty issues for successful CLI envelope with no extractable issues", () => {
     const raw = JSON.stringify({
       type: "result",
+      is_error: false,
       result: "I reviewed the code and found no issues to report.",
     });
-    expect(() => parseCliOutput(raw)).toThrow(ParseError);
+    const result = parseCliOutput(raw);
+    expect(result.issues).toEqual([]);
+  });
+
+  test("throws ParseError for unrecognized envelope structure", () => {
+    expect(() => parseCliOutput(JSON.stringify({ foo: "bar" }))).toThrow(
+      ParseError,
+    );
+  });
+
+  test("handles .result string with 'findings' key instead of 'issues'", () => {
+    const raw = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: `Audit complete:\n\n\`\`\`json\n${JSON.stringify({ findings: [] })}\n\`\`\``,
+    });
+    const result = parseCliOutput(raw);
+    expect(result.issues).toEqual([]);
+  });
+
+  test("handles .result string with 'violations' key instead of 'issues'", () => {
+    const raw = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: `Review results:\n\n\`\`\`json\n${JSON.stringify({ violations: [{ description: "test", rule: "R1", severity: "low", suggestion: "fix", policy: "p", files: ["a.ts"] }] })}\n\`\`\``,
+    });
+    const result = parseCliOutput(raw);
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0].rule).toBe("R1");
   });
 });
 
