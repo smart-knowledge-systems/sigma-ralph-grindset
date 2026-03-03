@@ -9,16 +9,16 @@
 bun install
 
 # Configure your project (interactive wizard)
-bun config
+bun run config
 
 # Generate branch map of your codebase
 bun branches
 
 # Audit against all active policies (uses Batch API by default)
-bun audit
+bun run audit
 
 # Audit a specific policy
-bun audit convex-conventions
+bun run audit convex-conventions
 
 # Apply fixes
 bun fix
@@ -34,14 +34,14 @@ When SIGMA is cloned into a subdirectory (e.g., `audit/`), run commands from the
 ```bash
 # All commands work with --cwd pointing to the audit directory
 bun --cwd audit install
-bun --cwd audit config
+bun --cwd audit run config
 bun --cwd audit branches
-bun --cwd audit audit
+bun --cwd audit run audit
 bun --cwd audit fix
 bun --cwd audit all
 
 # Or cd into the directory
-cd audit && bun audit && cd ..
+cd audit && bun run audit && cd ..
 ```
 
 SIGMA auto-detects portable mode: when the parent directory has `.git`, `PROJECT_ROOT` resolves to the parent project. Override with `SIGMA_PROJECT_ROOT` env var.
@@ -50,12 +50,12 @@ SIGMA auto-detects portable mode: when the parent directory has `.git`, `PROJECT
 
 | Command | Description |
 |---|---|
-| `bun audit [policies...]` | Run code quality audit |
+| `bun run audit [policies...]` | Run code quality audit |
 | `bun fix [policy]` | Apply fixes from audit.db |
 | `bun all` | Full pipeline: branches + audit + fix + checkpoint |
 | `bun branches` | Generate branches.txt |
-| `bun config` | Edit audit.conf interactively (terminal wizard) |
-| `bun config --ui` | Edit audit.conf in the browser |
+| `bun run config` | Edit audit.conf interactively (terminal wizard) |
+| `bun run config --ui` | Edit audit.conf in the browser |
 
 ### Audit Options
 
@@ -86,7 +86,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 bun audit
 
 # CLI mode — requires `claude` CLI installed
-bun audit --cli
+bun run audit --cli
 ```
 
 Set `DEFAULT_MODE="cli"` in `audit.conf` (or via `bun config`) to make CLI the default.
@@ -156,11 +156,11 @@ To add a new policy: `mkdir policies/my-policy`, write `POLICY.md`, run `bun aud
 1. **Clone into a subdirectory** of your project:
    ```bash
    git clone <repo-url> audit/
-   cd audit && bun install
+   cd audit && bun install && bun run setup
    ```
 2. **Configure** your project:
    ```bash
-   bun config
+   bun run config
    # or edit audit.conf directly
    ```
 3. **Add or customize policies** in `policies/` (or copy from `.policies/`)
