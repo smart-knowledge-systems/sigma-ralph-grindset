@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { AuditConfig, AuditResult, AuditMode } from "../types";
+import { buildAddendumContext } from "./addendum";
 import { log } from "../logging";
 import { events } from "../events";
 import {
@@ -68,6 +69,8 @@ export async function processBranch(
 
   const startTime = performance.now();
 
+  const addendumCtx = buildAddendumContext(config, files);
+
   try {
     let result: AuditResult;
 
@@ -77,6 +80,7 @@ export async function processBranch(
         files,
         policyNames,
         config,
+        addendumCtx,
       );
       result = cliResult.result;
     } else {
@@ -87,6 +91,7 @@ export async function processBranch(
         policyNames,
         config,
         useCaching,
+        addendumCtx,
       );
       result = apiResult.result;
       const cost = computeActualCost(config.auditModel, apiResult.usage, false);

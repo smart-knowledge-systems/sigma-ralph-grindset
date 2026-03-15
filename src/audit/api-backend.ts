@@ -4,6 +4,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { AuditResult, AuditConfig, TokenUsage } from "../types";
+import type { AddendumContext } from "./addendum";
 import { log } from "../logging";
 import { resolveModelId } from "../pricing";
 import {
@@ -124,6 +125,7 @@ export async function auditViaApi(
   policyNames: string[],
   config: AuditConfig,
   useCaching: boolean,
+  ctx?: AddendumContext,
 ): Promise<{ result: AuditResult; usage: TokenUsage }> {
   const c = getClient();
   const model = resolveModelId(config.auditModel);
@@ -133,8 +135,9 @@ export async function auditViaApi(
     ? (buildSystemPromptBlocks(
         config,
         policyNames,
+        ctx,
       ) as Anthropic.MessageCreateParams["system"])
-    : buildSystemPromptBlocks(config, policyNames)
+    : buildSystemPromptBlocks(config, policyNames, ctx)
         .map((b) => b.text)
         .join("\n");
 
@@ -173,13 +176,14 @@ function buildBatchRequest(
   policyNames: string[],
   config: AuditConfig,
   useCaching: boolean,
+  ctx?: AddendumContext,
 ): Anthropic.Messages.BatchCreateParams.Request {
   const model = resolveModelId(config.auditModel);
   const userPrompt = buildUserPrompt(branchPath, files, config);
 
   const system = useCaching
-    ? buildSystemPromptBlocks(config, policyNames)
-    : buildSystemPromptBlocks(config, policyNames).map((b) => ({
+    ? buildSystemPromptBlocks(config, policyNames, ctx)
+    : buildSystemPromptBlocks(config, policyNames, ctx).map((b) => ({
         type: b.type,
         text: b.text,
       }));
@@ -202,6 +206,7 @@ export async function* auditViaBatch(
   policyNames: string[],
   config: AuditConfig,
   useCaching: boolean,
+  ctx?: AddendumContext,
 ): AsyncGenerator<{
   type: "progress" | "result" | "complete";
   branchPath?: string;
@@ -222,6 +227,7 @@ export async function* auditViaBatch(
       policyNames,
       config,
       useCaching,
+      ctx,
     );
     idToBranch.set(req.custom_id, b.path);
     return req;
@@ -320,13 +326,14 @@ export function buildBatchRequestForBranch(
   policyName: string,
   config: AuditConfig,
   useCaching: boolean = true,
+  ctx?: AddendumContext,
 ): Anthropic.Messages.BatchCreateParams.Request {
   const model = resolveModelId(config.auditModel);
   const rawBlocks = buildSystemPromptBlocksForBranch(config, branchPath, files);
   const systemBlocks = useCaching
     ? rawBlocks
     : rawBlocks.map((b) => ({ type: b.type, text: b.text }));
-  const userPrompt = buildUserPromptForPolicy(policyName, config);
+  const userPrompt = buildUserPromptForPolicy(policyName, config, ctx);
 
   // custom_id format: a-{branchSlug}-{policySlug} (max 64 chars)
   const branchSlug = toSlug(branchPath, 28);
@@ -356,6 +363,7 @@ export async function* auditViaBatchPerBranch(
   policyNames: string[],
   config: AuditConfig,
   useCaching: boolean = true,
+  ctx?: AddendumContext,
 ): AsyncGenerator<{
   type: "progress" | "result" | "complete";
   branchPath?: string;
@@ -387,6 +395,7 @@ export async function* auditViaBatchPerBranch(
           policyName,
           config,
           useCaching,
+          ctx,
         );
         idToPolicy.set(req.custom_id, {
           branchPath: branch.path,

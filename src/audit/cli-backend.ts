@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { AuditResult, AuditIssue, AuditConfig } from "../types";
+import type { AddendumContext } from "./addendum";
 import { log } from "../logging";
 import { buildSystemPrompt, buildUserPrompt } from "./prompts";
 import {
@@ -410,8 +411,9 @@ export async function auditViaCli(
   files: string[],
   policyNames: string[],
   config: AuditConfig,
+  ctx?: AddendumContext,
 ): Promise<{ result: AuditResult; errorType?: string }> {
-  const systemPrompt = buildSystemPrompt(config, policyNames);
+  const systemPrompt = buildSystemPrompt(config, policyNames, ctx);
   const userPrompt = buildUserPrompt(branchPath, files, config);
 
   const schemaStr = JSON.stringify({

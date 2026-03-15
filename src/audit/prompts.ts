@@ -5,6 +5,8 @@
 import { readFileSync, existsSync } from "fs";
 import { resolve, relative } from "path";
 import type { AuditConfig } from "../types";
+import type { AddendumContext } from "./addendum";
+import { loadMatchingAddendums } from "./addendum";
 import { log } from "../logging";
 import { extToLang, extractImports } from "../branches/scanner";
 
@@ -50,7 +52,7 @@ Do NOT use alternative field names like "affected_files", "rule_violations", "fi
 const fileContentCache = new Map<string, string | null>();
 
 /** Read a file with caching. Returns content or null if unavailable/empty. */
-function cachedReadFile(path: string): string | null {
+export function cachedReadFile(path: string): string | null {
   if (fileContentCache.has(path)) return fileContentCache.get(path)!;
   if (!existsSync(path)) {
     fileContentCache.set(path, null);
@@ -67,13 +69,25 @@ function cachedReadFile(path: string): string | null {
   }
 }
 
-/** Load and return the text content of a single policy file, or null if unavailable. */
+/** Load and return the text content of a single policy file, or null if unavailable.
+ *  When an AddendumContext is provided, matching addendums are appended. */
 function loadPolicyText(
   config: AuditConfig,
   policyName: string,
+  ctx?: AddendumContext,
 ): string | null {
   const policyFile = resolve(config.policiesDir, policyName, "POLICY.md");
-  return cachedReadFile(policyFile);
+  const base = cachedReadFile(policyFile);
+  if (base === null) return null;
+
+  if (ctx) {
+    const policyDir = resolve(config.policiesDir, policyName);
+    const addendumText = loadMatchingAddendums(policyDir, ctx);
+    if (addendumText) {
+      return base + "\n\n" + addendumText;
+    }
+  }
+  return base;
 }
 
 /**
@@ -83,11 +97,12 @@ function loadPolicyText(
 function loadFormattedPolicies(
   config: AuditConfig,
   policyNames: string[],
+  ctx?: AddendumContext,
 ): { text: string; loaded: number } {
   let text = "";
   let loaded = 0;
   for (const policyName of policyNames) {
-    const content = loadPolicyText(config, policyName);
+    const content = loadPolicyText(config, policyName, ctx);
     if (content === null) {
       log.warn(`Policy file not found or empty: ${policyName}, skipping`);
       continue;
@@ -102,10 +117,12 @@ function loadFormattedPolicies(
 export function buildSystemPrompt(
   config: AuditConfig,
   policyNames: string[],
+  ctx?: AddendumContext,
 ): string {
   const { text: policyText, loaded } = loadFormattedPolicies(
     config,
     policyNames,
+    ctx,
   );
   if (loaded === 0) {
     throw new Error("No valid policy files loaded");
@@ -120,12 +137,13 @@ export function buildSystemPrompt(
 export function buildSystemPromptBlocks(
   config: AuditConfig,
   policyNames: string[],
+  ctx?: AddendumContext,
 ): Array<{
   type: "text";
   text: string;
   cache_control?: { type: "ephemeral" };
 }> {
-  const { text: policyText } = loadFormattedPolicies(config, policyNames);
+  const { text: policyText } = loadFormattedPolicies(config, policyNames, ctx);
   return [
     { type: "text", text: AUDIT_INSTRUCTIONS },
     { type: "text", text: policyText, cache_control: { type: "ephemeral" } },
@@ -183,14 +201,15 @@ export function buildSystemPromptBlocksForBranch(
 
 /**
  * Build the user prompt for a single policy in per-branch mode.
- * Loads the policy POLICY.md and appends review instructions specifying the
- * policy name for the output `policy` field.
+ * Loads the policy POLICY.md (with matching addendums) and appends review
+ * instructions specifying the policy name for the output `policy` field.
  */
 export function buildUserPromptForPolicy(
   policyName: string,
   config: AuditConfig,
+  ctx?: AddendumContext,
 ): string {
-  const content = loadPolicyText(config, policyName);
+  const content = loadPolicyText(config, policyName, ctx);
   if (!content) {
     throw new Error(`Policy file not found or empty: ${policyName}`);
   }

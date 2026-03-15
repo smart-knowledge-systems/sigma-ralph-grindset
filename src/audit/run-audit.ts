@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { spawnSync } from "child_process";
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { existsSync, readdirSync } from "fs";
 import { resolve } from "path";
 import type {
   AuditConfig,
@@ -44,7 +44,8 @@ import {
   formatPerBranchEstimate,
   resolveModelId,
 } from "../pricing";
-import { buildSystemPrompt } from "./prompts";
+import { buildSystemPrompt, cachedReadFile } from "./prompts";
+import { buildAddendumContext, loadMatchingAddendums } from "./addendum";
 import { ensureApiKey, clearEphemeralApiKey } from "./ensure-api-key";
 import { randomUUID } from "crypto";
 
@@ -563,9 +564,10 @@ async function runPerBranchBatch(
     ? perBranchEstimate.totalBatchApiCost
     : perBranchEstimate.totalNoCacheCost;
 
+  const addendumCtx = buildAddendumContext(config);
   const { auditViaBatchPerBranch } = await import("./api-backend");
   await processBatchEvents(
-    auditViaBatchPerBranch(branchesWithFiles, policyNames, config, useCaching),
+    auditViaBatchPerBranch(branchesWithFiles, policyNames, config, useCaching, addendumCtx),
     config,
     policyLabel,
     estimatedCost,
@@ -584,7 +586,8 @@ async function runCombinedBatch(
   branchesWithFiles: Array<{ path: string; files: string[] }>,
   counters: AuditCounters,
 ): Promise<AuditCounters> {
-  const systemPrompt = buildSystemPrompt(config, policyNames);
+  const addendumCtx = buildAddendumContext(config);
+  const systemPrompt = buildSystemPrompt(config, policyNames, addendumCtx);
   const systemTokens = estimateTokens(systemPrompt.length);
 
   // Calculate avg branch size in a single pass
@@ -640,7 +643,7 @@ async function runCombinedBatch(
   const useCaching = estimate.batchCachingEnabled;
   const { auditViaBatch } = await import("./api-backend");
   await processBatchEvents(
-    auditViaBatch(branchesWithFiles, policyNames, config, useCaching),
+    auditViaBatch(branchesWithFiles, policyNames, config, useCaching, addendumCtx),
     config,
     policyLabel,
     estimate.batchApiCost,
@@ -913,19 +916,24 @@ export function computePerBranchCostEstimate(
     totalBranchChars / Math.max(branchesWithFiles.length, 1);
   const avgBranchTokens = estimateTokens(avgBranchChars);
 
+  // Build addendum context for cost estimation (config-level only, no per-file imports)
+  const addendumCtx = buildAddendumContext(config);
+
   // Instruction tokens (shared audit instructions without policy text)
   const instructionTokens = estimateTokens(
-    buildSystemPrompt(config, [policyNames[0]!]).length,
+    buildSystemPrompt(config, [policyNames[0]!], addendumCtx).length,
   );
 
-  // Per-policy token counts from policy files
+  // Per-policy token counts from policy files (including matched addendums)
   const policyTokensList = policyNames.map((name) => {
     const policyFile = resolve(config.policiesDir, name, "POLICY.md");
-    let tokens = 0;
-    if (existsSync(policyFile)) {
-      const content = readFileSync(policyFile, "utf-8");
-      tokens = estimateTokens(content.length);
-    }
+    let content = cachedReadFile(policyFile) ?? "";
+    const addendumText = loadMatchingAddendums(
+      resolve(config.policiesDir, name),
+      addendumCtx,
+    );
+    if (addendumText) content += "\n\n" + addendumText;
+    const tokens = estimateTokens(content.length);
     return { name, tokens };
   });
 
