@@ -118,10 +118,7 @@ export function discoverAddendums(policyDir: string): string[] {
   try {
     const entries = readdirSync(policyDir);
     return entries
-      .filter(
-        (name) =>
-          name.startsWith("ADDENDUM-") && name.endsWith(".md"),
-      )
+      .filter((name) => name.startsWith("ADDENDUM-") && name.endsWith(".md"))
       .sort()
       .map((name) => resolve(policyDir, name));
   } catch {

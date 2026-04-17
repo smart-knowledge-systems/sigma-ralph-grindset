@@ -16,7 +16,11 @@ import type {
 } from "../types";
 import { log } from "../logging";
 import { events } from "../events";
-import { initDatabase, getCheckpointCommit } from "../db";
+import {
+  initDatabase,
+  getCheckpointCommit,
+  supersedePendingIssues,
+} from "../db";
 import { loadBranches, fileToBranch, getDiffFiles } from "../branches/loader";
 import {
   findSourceFiles,
@@ -275,6 +279,26 @@ export async function waitForConfirmation(requestId: string): Promise<boolean> {
   });
 }
 
+/** Supersede any pending issues from prior audits of this branch+policy
+ *  before we re-scan. Called once per (branch, policy) regardless of how
+ *  many batches the scan will be split into — otherwise each batch would
+ *  clobber the pending issues produced by the previous batch.
+ */
+function supersedeBeforeScan(
+  config: AuditConfig,
+  branchPath: string,
+  policyNames: string[],
+  policyLabel: string,
+): void {
+  const allPolicies = [...policyNames, policyLabel];
+  const superseded = supersedePendingIssues(config, branchPath, allPolicies);
+  if (superseded > 0) {
+    log.info(
+      `  Superseded ${superseded} stale issues for ${branchPath} [${policyLabel}]`,
+    );
+  }
+}
+
 /** Load branches and their files, filtering out empty/missing ones.
  *  When maxLoc is provided, branches exceeding the limit are split into
  *  multiple entries with suffixed paths (e.g. "src/components [batch 1]").
@@ -427,6 +451,8 @@ async function runDiffMode(
   log.info(`Changed files: ${diffFiles.length}`);
   log.info("");
 
+  supersedeBeforeScan(config, "(diff)", policyNames, policyLabel);
+
   const batches = batchFilesForAudit(diffFiles, effectiveMaxLoc);
   for (let i = 0; i < batches.length; i++) {
     const suffix = batches.length > 1 ? ` [batch ${i + 1}]` : "";
@@ -567,7 +593,13 @@ async function runPerBranchBatch(
   const addendumCtx = buildAddendumContext(config);
   const { auditViaBatchPerBranch } = await import("./api-backend");
   await processBatchEvents(
-    auditViaBatchPerBranch(branchesWithFiles, policyNames, config, useCaching, addendumCtx),
+    auditViaBatchPerBranch(
+      branchesWithFiles,
+      policyNames,
+      config,
+      useCaching,
+      addendumCtx,
+    ),
     config,
     policyLabel,
     estimatedCost,
@@ -643,7 +675,13 @@ async function runCombinedBatch(
   const useCaching = estimate.batchCachingEnabled;
   const { auditViaBatch } = await import("./api-backend");
   await processBatchEvents(
-    auditViaBatch(branchesWithFiles, policyNames, config, useCaching, addendumCtx),
+    auditViaBatch(
+      branchesWithFiles,
+      policyNames,
+      config,
+      useCaching,
+      addendumCtx,
+    ),
     config,
     policyLabel,
     estimate.batchApiCost,
@@ -709,6 +747,8 @@ async function runNormalMode(
     }
 
     const totalLoc = countLoc(files);
+
+    supersedeBeforeScan(config, branch.path, policyNames, policyLabel);
 
     if (totalLoc <= effectiveMaxLoc) {
       const result = await processBranch(

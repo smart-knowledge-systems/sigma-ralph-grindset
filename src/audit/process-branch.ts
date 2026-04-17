@@ -13,7 +13,6 @@ import {
   insertIssue,
   ensureFile,
   linkIssueFile,
-  supersedePendingIssues,
 } from "../db";
 import { computeActualCost } from "../pricing";
 import { countLoc } from "../branches/scanner";
@@ -40,15 +39,6 @@ export async function processBranch(
   useCaching: boolean,
 ): Promise<ProcessBranchResult> {
   const branchLabel = `${branchPath}${batchSuffix}`;
-
-  // Supersede pending issues
-  const allPolicies = [...policyNames, policyLabel];
-  const superseded = supersedePendingIssues(config, branchPath, allPolicies);
-  if (superseded > 0) {
-    log.info(
-      `  Superseded ${superseded} stale issues for ${branchPath} [${policyLabel}]`,
-    );
-  }
 
   events.emit({
     type: "audit.branch.start",
